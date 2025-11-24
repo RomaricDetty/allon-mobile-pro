@@ -1,0 +1,1 @@
+export const baseUrl = 'https://dev-allon-backend.onrender.com/api';

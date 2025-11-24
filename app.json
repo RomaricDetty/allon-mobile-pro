@@ -26,6 +26,12 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permettre à Allon Mobile Pro d'accéder à votre caméra pour scanner les QR codes."
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",
@@ -38,7 +44,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-barcode-scanner"
     ],
     "experiments": {
       "typedRoutes": true,
