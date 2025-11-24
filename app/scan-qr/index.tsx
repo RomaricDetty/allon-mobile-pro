@@ -1,5 +1,4 @@
-// app/scan-qr.tsx
-import Icon from '@expo/vector-icons/MaterialIcons';
+//@ts-nocheck
 import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
@@ -13,6 +12,7 @@ import {
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
 /**
  * Écran de scan de QR Code avec design moderne
@@ -113,7 +113,7 @@ const ScanQRScreen = () => {
         return (
             <View style={styles.container}>
                 <View style={styles.permissionContainer}>
-                    <Icon name="camera-off" size={80} color="rgba(255,255,255,0.5)" />
+                    <MaterialCommunityIcons name="camera-off" size={80} color="rgba(255,255,255,0.5)" />
                     <Text style={styles.permissionTitle}>Accès caméra requis</Text>
                     <Text style={styles.permissionText}>
                         Nous avons besoin d'accéder à votre caméra pour scanner les QR codes.
@@ -133,7 +133,7 @@ const ScanQRScreen = () => {
                 style={[styles.closeButton, { top: insets.top + 16 }]}
                 onPress={() => router.back()}
             >
-                <Icon name="close" size={28} color="#FFF" />
+                <MaterialCommunityIcons name="close" size={28} color="#FFF" />
             </Pressable>
 
             {/* Bouton Torche (en haut à droite) */}
@@ -141,7 +141,7 @@ const ScanQRScreen = () => {
                 style={[styles.torchButton, { top: insets.top + 16 }]}
                 onPress={toggleTorch}
             >
-                <Icon
+                <MaterialCommunityIcons
                     name={torchEnabled ? "flashlight" : "flashlight-off"}
                     size={24}
                     color="#FFF"
@@ -186,7 +186,7 @@ const ScanQRScreen = () => {
                             </Text>
                             {hasScannedOnce && (
                                 <Pressable style={styles.rescanButton} onPress={resetScan}>
-                                    <Icon name="refresh" size={20} color="#000" />
+                                    <MaterialCommunityIcons name="refresh" size={20} color="#000" />
                                     <Text style={styles.rescanButtonText}>Refaire le scan</Text>
                                 </Pressable>
                             )}
