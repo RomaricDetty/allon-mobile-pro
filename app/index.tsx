@@ -1,154 +1,160 @@
 //@ts-nocheck
-import { AuthFormField } from '@/components/auth/AuthFormField';
-import { PasswordField } from '@/components/auth/PasswordField';
+import { refreshTokenApi } from '@/api/auth_login';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useThemeColor } from '@/hooks/use-theme-color';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Image, StyleSheet, Text, View } from 'react-native';
 
 /**
- * Écran de connexion avec formulaire et options de connexion sociale
+ * Écran de redirection qui vérifie la session utilisateur
+ * - Redirige vers /(tabs) si l'utilisateur est connecté
+ * - Redirige vers /login si l'utilisateur n'est pas connecté
  */
 const Index = () => {
-    
     const colorScheme = useColorScheme() ?? 'light';
-    
-    // Couleurs dynamiques basées sur le thème
-    const backgroundColor = useThemeColor({}, 'background');
-    const textColor = useThemeColor({}, 'text');
-    const tintColor = useThemeColor({}, 'tint');
-    
-    // Couleurs spécifiques pour l'écran
-    const scrollBackgroundColor = colorScheme === 'dark' ? '#000000' : '#F3F3F7';
-    const secondaryTextColor = colorScheme === 'dark' ? '#9BA1A6' : '#666';
-    const separatorLineColor = colorScheme === 'dark' ? '#3A3A3C' : '#E0E0E0';
-    const linkColor = tintColor === '#fff' ? '#1776BA' : tintColor;
-
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    const [isCheckingSession, setIsCheckingSession] = useState(true);
 
     /**
-     * Handle the sign in action
+     * Nettoie les données d'authentification stockées
      */
-    const handleSignIn = async () => {
-        setIsLoading(true);
-        router.replace('/scan-qr');
-        return;
-        
+    const clearAuthData = async () => {
+        await AsyncStorage.multiRemove([
+            'token',
+            'refresh_token',
+            'expires_at',
+            'expires_in',
+            'token_type',
+            'user_id',
+        ]);
     };
 
+    /**
+     * Vérifie et gère la session utilisateur
+     * - Vérifie si le token existe et est valide
+     * - Rafraîchit le token si nécessaire
+     * - Redirige vers l'écran approprié
+     */
+    const checkUserSession = useCallback(async () => {
+        try {
+            setIsCheckingSession(true);
+            const [token, expiresAt, refreshToken] = await Promise.all([
+                AsyncStorage.getItem('token'),
+                AsyncStorage.getItem('expires_at'),
+                AsyncStorage.getItem('refresh_token'),
+            ]);
 
+            // Si aucun token n'existe, rediriger vers l'écran de connexion
+            if (!token || !refreshToken) {
+                await clearAuthData();
+                router.replace('/login');
+                return;
+            }
 
-    return (
-        <ScrollView
-            style={[styles.container, { backgroundColor: scrollBackgroundColor }]}
-            contentContainerStyle={styles.contentContainer}
-            showsVerticalScrollIndicator={false}
-        >
-            <View style={styles.header}>
-                <Text style={[styles.title, { color: textColor }]}>Se connecter</Text>
-                <Text style={[styles.subtitle, { color: secondaryTextColor }]}>Connectez-vous pour accéder à votre compte</Text>
+            const currentDate = new Date();
+            const expiresAtDate = expiresAt ? new Date(Number(expiresAt) * 1000) : null;
+
+            // Vérifier si le token est expiré ou sur le point d'expirer (marge de 5 minutes)
+            const isTokenExpired = !expiresAtDate || expiresAtDate < new Date(currentDate.getTime() + 5 * 60 * 1000);
+
+            // Rafraîchir le token uniquement si nécessaire
+            if (isTokenExpired) {
+                try {
+                    const response = await refreshTokenApi(refreshToken);
+                    
+                    if (response.status === 200 && response.data?.access_token) {
+                        // Sauvegarder les nouveaux tokens
+                        await Promise.all([
+                            AsyncStorage.setItem('token', response.data.access_token),
+                            AsyncStorage.setItem('expires_at', String(response.data.expires_in)),
+                            AsyncStorage.setItem('token_type', response.data.token_type),
+                        ]);
+
+                        // Rediriger vers l'écran principal
+                        router.replace('/(tabs)');
+                        return;
+                    }
+                } catch (refreshError) {
+                    console.error('Erreur lors du rafraîchissement du token:', refreshError);
+                    // Si le refresh échoue, nettoyer et rediriger vers l'écran de connexion
+                    await clearAuthData();
+                    router.replace('/login');
+                    return;
+                }
+            }
+
+            // Si le token est encore valide, rediriger vers l'écran principal
+            if (token) {
+                router.replace('/(tabs)');
+                return;
+            }
+
+            // Par défaut, rediriger vers l'écran de connexion
+            router.replace('/login');
+        } catch (error) {
+            console.error('Erreur lors de la vérification de la session:', error);
+            await clearAuthData();
+            router.replace('/login');
+        } finally {
+            setIsCheckingSession(false);
+        }
+    }, []);
+
+    /**
+     * Vérifie l'authentification au chargement de l'écran
+     */
+    useEffect(() => {
+        checkUserSession();
+    }, [checkUserSession]);
+
+    // Toujours afficher un fond pour éviter l'écran blanc lors de la navigation
+    const backgroundColor = colorScheme === 'dark' ? '#000000' : '#F3F3F7';
+    
+    // Afficher le splash screen personnalisé pendant la vérification de la session
+    if (isCheckingSession) {
+        const textColor = colorScheme === 'dark' ? '#FFFFFF' : '#000000';
+        const logoSource = colorScheme === 'dark' 
+            ? require('@/assets/images/onboarding/logo-allon-blanc.png')
+            : require('@/assets/images/allon-logo-transparent.png');
+
+        return (
+            <View style={[styles.container, { backgroundColor }]}>
+                <View style={styles.logoContainer}>
+                    <Image 
+                        source={logoSource} 
+                        style={styles.logo}
+                        resizeMode="contain"
+                    />
+                    <Text style={[styles.proText, { color: "#1776BA" }]}>PRO</Text>
+                </View>
             </View>
+        );
+    }
 
-            <View style={styles.form}>
-                <AuthFormField
-                    label="Adresse email"
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="Entrez votre email"
-                    keyboardType="email-address"
-                />
-                <PasswordField
-                    label="Mot de passe"
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Entrez votre mot de passe"
-                />
-
-            </View>
-
-            <Pressable
-                style={styles.primaryButton}
-                onPress={handleSignIn}
-                disabled={isLoading}
-            >
-                {isLoading ? <ActivityIndicator size="small" color="#FFFFFF" /> : (
-                    <Text style={styles.primaryButtonText}>Se connecter</Text>
-                )}
-            </Pressable>
-            
-        </ScrollView>
-    );
+    // Retourner un View vide avec fond pour éviter l'écran blanc pendant la transition
+    return <View style={[styles.container, { backgroundColor }]} />;
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-    },
-    contentContainer: {
-        flexGrow: 1,
         justifyContent: 'center',
-        padding: 20,
-        paddingTop: 40,
+        alignItems: 'center',
     },
-    header: {
-        marginBottom: 32,
+    logoContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    title: {
-        fontSize: 32,
+    logo: {
+        width: 200,
+        height: 200,
+    },
+    proText: {
+        fontSize: 24,
         fontFamily: 'Ubuntu_Bold',
-        marginBottom: 8,
-    },
-    subtitle: {
-        fontSize: 16,
-        fontFamily: 'Ubuntu_Regular',
-    },
-    form: {
-        marginBottom: 24,
-    },
-    primaryButton: {
-        backgroundColor: '#1776BA',
-        borderRadius: 8,
-        paddingVertical: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 24,
-    },
-    primaryButtonText: {
-        fontSize: 16,
-        fontFamily: 'Ubuntu_Bold',
-        color: '#FFFFFF',
-    },
-    separator: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 24,
-    },
-    separatorLine: {
-        flex: 1,
-        height: 1,
-    },
-    separatorText: {
-        marginHorizontal: 16,
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Regular',
-    },
-    footer: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    footerText: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Regular',
-    },
-    footerLink: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Medium',
+        marginTop: 8,
+        letterSpacing: 2,
     },
 });
-
 
 export default Index;
