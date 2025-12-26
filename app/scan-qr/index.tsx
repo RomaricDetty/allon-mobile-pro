@@ -701,7 +701,7 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     rescanButtonActive: {
-        backgroundColor: '#4CAF50',
+        backgroundColor: '#1776BA',
     },
     rescanButtonText: {
         fontSize: 16,

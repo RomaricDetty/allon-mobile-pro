@@ -70,6 +70,13 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-maps",
+        {
+          "requestLocationPermission": true,
+          "locationPermission": "Permettre à $(PRODUCT_NAME) d'accéder à votre position pour afficher votre emplacement sur la carte."
+        }
       ]
     ],
     "experiments": {
