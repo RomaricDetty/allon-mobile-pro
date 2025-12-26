@@ -1,7 +1,7 @@
-import React from 'react';
-import { Image, TouchableOpacity } from 'react-native';
+import React from "react";
+import { Image, View } from "react-native";
 
-import { Marker } from 'react-native-maps';
+import { Marker } from "react-native-maps";
 
 interface UserMarkerProps {
   region: {
@@ -12,18 +12,25 @@ interface UserMarkerProps {
   };
 }
 
-const UserMarker: React.FC<UserMarkerProps> = ({region}) => {
+const UserMarker: React.FC<UserMarkerProps> = ({ region }) => {
   return (
-    <Marker coordinate={region} tracksViewChanges={false} style={{zIndex: 200}}>
-      <TouchableOpacity style={{}}>
+    <Marker
+      coordinate={region}
+      tracksViewChanges={false}
+      anchor={{ x: 0.5, y: 0.5 }}
+      flat={true}
+      style={{ zIndex: 200 }}
+    >
+      <View>
         <Image
-          source={require("@/assets/images/transport.png")}
+          source={require("@/assets/images/bus.png")}
           resizeMethod="resize"
-          style={{width: 50, height: 50}}
+          resizeMode="contain"
+          style={{ width: 50, height: 150 }}
         />
-      </TouchableOpacity>
+      </View>
     </Marker>
   );
 };
 
-export default UserMarker;
+export default React.memo(UserMarker);
