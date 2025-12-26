@@ -13,6 +13,7 @@ export interface Departure {
     id: string;
     company?: string;
     busType?: string;
+    busLicensePlate?: string;
     classStatus?: string;
     departureStationCode?: string;
     departureStationName?: string;
@@ -134,7 +135,7 @@ const getStatusColor = (status?: string, isDark: boolean = false): string => {
     const colorMapping = STATUS_COLOR_MAPPING[upperStatus];
 
     // Retourne la couleur correspondante ou une couleur par défaut
-    return colorMapping 
+    return colorMapping
         ? (isDark ? colorMapping.dark : colorMapping.light)
         : (isDark ? '#98989D' : '#8E8E93');
 };
@@ -185,99 +186,107 @@ export function DepartureCard({ departure, onTicketPress, onMapPress }: Departur
                     }
                 ]}
             >
-            {/* Section supérieure : Compagnie et type de bus */}
-            <View style={styles.topSection}>
-                <View style={[styles.companyInfo]}>
-                    <View style={[styles.companyLogoCircle, { borderColor: borderColor, borderWidth: 1, borderRadius: 100 }]}>
-                        <MaterialIcons name="directions-bus-filled" size={24} color={busIconColor} />
+                {/* Section supérieure : Compagnie et type de bus */}
+                <View style={styles.topSection}>
+                    <View style={[styles.companyInfo]}>
+                        <View style={[styles.companyLogoCircle, { borderColor: borderColor, borderWidth: 1, borderRadius: 100 }]}>
+                            <MaterialIcons name="directions-bus-filled" size={24} color={busIconColor} />
+                        </View>
+                        <View style={styles.companyTextContainer}>
+                            <ThemedText style={[styles.companyName, { color: primaryTextColor }]}>
+                                {departure.company || 'Compagnie'}
+                            </ThemedText>
+                        </View>
                     </View>
-                    <View style={styles.companyTextContainer}>
-                        <ThemedText style={[styles.companyName, { color: primaryTextColor }]}>
-                            {departure.company || 'Compagnie'}
+                    <View style={[{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }]}>
+                        {departure.busType && (
+                            <ThemedText style={[styles.classStatus, { color: secondaryTextColor }]}>
+                                {departure.busType?.charAt(0).toUpperCase() + (departure.busType?.slice(1) || '') || departure.line?.charAt(0).toUpperCase() + (departure.line?.slice(1) || '') || 'Bus'}
+                            </ThemedText>
+                        )}
+
+                        {departure.busLicensePlate && (
+                            <ThemedText style={[styles.classStatus, { color: secondaryTextColor }]}>
+                                {departure.busLicensePlate}
+                            </ThemedText>
+                        )}
+                    </View>
+                </View>
+
+                {/* Section médiane : Trajet avec icône de bus */}
+                <View style={[styles.middleSection]}>
+                    {/* Départ */}
+                    <View style={[styles.stationContainer, {}]}>
+                        <ThemedText style={[styles.label, { color: secondaryTextColor, alignSelf: 'flex-start' }]}>
+                            DÉPART
+                        </ThemedText>
+                        <ThemedText style={[styles.stationCode, { color: primaryTextColor }]}>
+                            {departure.departureCity?.slice(0, 3).toUpperCase()}
+                        </ThemedText>
+                        <ThemedText style={[styles.stationName, { color: primaryTextColor }]}>
+                            {
+                                departure.departureStationName?.length && departure.departureStationName?.length > 10 ? departure.departureStationName?.slice(0, 10) + '...' : departure.departureStationName || 'Gare'
+                            }
+                        </ThemedText>
+                        {departure.departureCity && (
+                            <ThemedText style={[styles.city, { color: primaryTextColor }]}>
+                                {departure.departureCity}
+                            </ThemedText>
+                        )}
+                        <ThemedText style={[styles.time, { color: primaryTextColor }]}>
+                            {departure.departureTime || '--:--'}
+                        </ThemedText>
+                    </View>
+
+                    {/* Icône de bus au centre */}
+                    <View style={[styles.busIconContainer, { borderWidth: 1, borderColor: borderColor, padding: 8, borderRadius: 100 }]}>
+                        <MaterialIcons name="arrow-forward" size={28} color={busIconColor} />
+                    </View>
+
+                    {/* Arrivée */}
+                    <View style={[styles.stationContainer, styles.arrivalContainer, {}]}>
+                        <ThemedText style={[styles.label, styles.textRight, { color: secondaryTextColor, alignSelf: 'flex-end' }]}>
+                            ARRIVÉE
+                        </ThemedText>
+                        <ThemedText style={[styles.stationCode, styles.textRight, { color: primaryTextColor }]}>
+                            {departure.arrivalCity?.slice(0, 3).toUpperCase()}
+                            {/* {departure.arrivalStationName?.slice(0, 10).toUpperCase()} */}
+                        </ThemedText>
+                        <ThemedText style={[styles.stationName, styles.textRight, { color: primaryTextColor }]}>
+                            {
+                                departure.arrivalStationName?.length && departure.arrivalStationName?.length > 10 ? departure.arrivalStationName?.slice(0, 10) + '...' : departure.arrivalStationName || 'Gare'
+                            }
+                        </ThemedText>
+                        {departure.arrivalCity && (
+                            <ThemedText style={[styles.city, styles.textRight, { color: primaryTextColor }]}>
+                                {departure.arrivalCity}
+                            </ThemedText>
+                        )}
+                        <ThemedText style={[styles.time, styles.textRight, { color: primaryTextColor }]}>
+                            {departure.arrivalTime || '--:--'}
                         </ThemedText>
                     </View>
                 </View>
-                {departure.classStatus && (
-                    <ThemedText style={[styles.classStatus, { color: secondaryTextColor }]}>
-                        {departure.busType?.charAt(0).toUpperCase() + (departure.busType?.slice(1) || '') || departure.line?.charAt(0).toUpperCase() + (departure.line?.slice(1) || '') || 'Bus'}
-                    </ThemedText>
-                )}
-            </View>
 
-            {/* Section médiane : Trajet avec icône de bus */}
-            <View style={[styles.middleSection]}>
-                {/* Départ */}
-                <View style={[styles.stationContainer, {}]}>
-                    <ThemedText style={[styles.label, { color: secondaryTextColor, alignSelf: 'flex-start' }]}>
-                        DÉPART
-                    </ThemedText>
-                    <ThemedText style={[styles.stationCode, { color: primaryTextColor }]}>
-                        {departure.departureCity?.slice(0, 3).toUpperCase()}
-                    </ThemedText>
-                    <ThemedText style={[styles.stationName, { color: primaryTextColor }]}>
-                        {
-                            departure.departureStationName?.length && departure.departureStationName?.length > 10 ? departure.departureStationName?.slice(0, 10) + '...' : departure.departureStationName || 'Gare'
-                        }
-                    </ThemedText>
-                    {departure.departureCity && (
-                        <ThemedText style={[styles.city, { color: primaryTextColor }]}>
-                            {departure.departureCity}
+                {/* Section inférieure : Date, Durée et Prix */}
+                <View style={[styles.bottomSection, { borderTopColor: borderColor }]}>
+                    <View style={styles.infoItem}>
+                        <MaterialIcons name="calendar-month" size={16} color={iconColor} />
+                        <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
+                            {departure.date || departure.departureDate || '--'}
                         </ThemedText>
-                    )}
-                    <ThemedText style={[styles.time, { color: primaryTextColor }]}>
-                        {departure.departureTime || '--:--'}
-                    </ThemedText>
-                </View>
-
-                {/* Icône de bus au centre */}
-                <View style={[styles.busIconContainer, { borderWidth: 1, borderColor: borderColor, padding: 8, borderRadius: 100 }]}>
-                    <MaterialIcons name="arrow-forward" size={28} color={busIconColor} />
-                </View>
-
-                {/* Arrivée */}
-                <View style={[styles.stationContainer, styles.arrivalContainer, {}]}>
-                    <ThemedText style={[styles.label, styles.textRight, { color: secondaryTextColor, alignSelf: 'flex-end' }]}>
-                        ARRIVÉE
-                    </ThemedText>
-                    <ThemedText style={[styles.stationCode, styles.textRight, { color: primaryTextColor }]}>
-                        {departure.arrivalCity?.slice(0, 3).toUpperCase()}
-                        {/* {departure.arrivalStationName?.slice(0, 10).toUpperCase()} */}
-                    </ThemedText>
-                    <ThemedText style={[styles.stationName, styles.textRight, { color: primaryTextColor }]}>
-                        {
-                            departure.arrivalStationName?.length && departure.arrivalStationName?.length > 10 ? departure.arrivalStationName?.slice(0, 10) + '...' : departure.arrivalStationName || 'Gare'
-                        }
-                    </ThemedText>
-                    {departure.arrivalCity && (
-                        <ThemedText style={[styles.city, styles.textRight, { color: primaryTextColor }]}>
-                            {departure.arrivalCity}
+                    </View>
+                    <View style={styles.infoItem}>
+                        <MaterialIcons name="timer" size={16} color={iconColor} />
+                        <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
+                            {departure.duration || '--'}
                         </ThemedText>
-                    )}
-                    <ThemedText style={[styles.time, styles.textRight, { color: primaryTextColor }]}>
-                        {departure.arrivalTime || '--:--'}
+                    </View>
+                    <ThemedText style={[styles.price, { color: getStatusColor(departure.status, isDark) }]}>
+                        {getStatusLabel(departure.status)}
                     </ThemedText>
                 </View>
-            </View>
-
-            {/* Section inférieure : Date, Durée et Prix */}
-            <View style={[styles.bottomSection, { borderTopColor: borderColor }]}>
-                <View style={styles.infoItem}>
-                    <MaterialIcons name="calendar-month" size={16} color={iconColor} />
-                    <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
-                        {departure.date || departure.departureDate || '--'}
-                    </ThemedText>
-                </View>
-                <View style={styles.infoItem}>
-                    <MaterialIcons name="timer" size={16} color={iconColor} />
-                    <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
-                        {departure.duration || '--'}
-                    </ThemedText>
-                </View>
-                <ThemedText style={[styles.price, { color: getStatusColor(departure.status, isDark) }]}>
-                    {getStatusLabel(departure.status)}
-                </ThemedText>
-            </View>
-        </ThemedView>
+            </ThemedView>
         </TouchableOpacity>
     );
 }

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "allon-mobile-pro",
+    "name": "AllOn Pro",
     "slug": "allon-mobile-pro",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,7 +17,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.romdja.allonmobilepro",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +32,14 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "package": "com.romdja.allonmobilepro"
     },
     "web": {
       "output": "static",
@@ -38,6 +50,12 @@
         "expo-camera",
         {
           "cameraPermission": "Permettre à Allon Mobile Pro d'accéder à votre caméra pour scanner les QR codes."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel."
         }
       ],
       "expo-router",
@@ -52,8 +70,7 @@
             "backgroundColor": "#000000"
           }
         }
-      ],
-      "expo-barcode-scanner"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

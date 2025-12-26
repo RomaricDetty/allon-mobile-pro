@@ -4,7 +4,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -87,16 +87,38 @@ export default function DepartureDetailsScreen() {
     };
 
     /**
-     * Gère l'action du bouton de téléchargement
-     */
-    const handleDownload = () => {
-        // TODO: Implémenter la fonctionnalité de téléchargement
-        console.log('Téléchargement du ticket pour le départ:', departure?.id);
+     * Gère l'action du bouton de démarrage du trajet
+     * Affiche une alerte de confirmation pour le partage de position géographique
+    */
+    const handleStartTraject = () => {
+        Alert.alert(
+            'Démarrer le trajet',
+            'Vous êtes sur le point de démarrer le trajet. En confirmant, vous acceptez de partager votre position géographique en temps réel pour permettre aux usagers de voir votre position sur la carte.',
+            [
+                {
+                    text: 'Annuler',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Confirmer',
+                    onPress: () => {
+                        // Redirige vers l'écran de suivi de trajet avec les données du départ
+                        router.push({
+                            pathname: '/track-route',
+                            params: {
+                                departure: JSON.stringify(departure),
+                            },
+                        });
+                    },
+                },
+            ],
+            { cancelable: true }
+        );
     };
 
     /**
      * Gère l'action du bouton d'options
-     */
+    */
     const handleOptions = () => {
         // TODO: Implémenter le menu d'options
         console.log('Options pour le départ:', departure?.id);
@@ -104,9 +126,93 @@ export default function DepartureDetailsScreen() {
 
     /**
      * Gère la redirection vers l'écran de scan QR
-     */
+    */
     const handleScanQR = () => {
         router.push('/scan-qr');
+    };
+
+    /**
+     * Tableau de correspondance des statuts techniques vers des libellés français
+    */
+    const STATUS_MAPPING: Record<string, string> = {
+        'SCHEDULED': 'Programmé',
+        'ON_TIME': 'À l\'heure',
+        'DELAYED': 'Retardé',
+        'CANCELLED': 'Annulé',
+        'BOARDING': 'En embarquement',
+        'DEPARTED': 'Parti',
+        'ARRIVED': 'Arrivé',
+        'IN_TRANSIT': 'En transit',
+        'COMPLETED': 'Terminé',
+        'PENDING': 'En attente',
+        'CONFIRMED': 'Confirmé',
+        'AVAILABLE': 'Disponible',
+        'FULL': 'Complet',
+        'CLOSED': 'Fermé',
+    };
+
+    /**
+     * Tableau de correspondance des statuts techniques vers des couleurs
+    */
+    const STATUS_COLOR_MAPPING: Record<string, { light: string; dark: string }> = {
+        'SCHEDULED': { light: '#1776BA', dark: '#1776BA' }, // Bleu
+        'ON_TIME': { light: '#34C759', dark: '#30D158' }, // Vert
+        'DELAYED': { light: '#FF9500', dark: '#FF9F0A' }, // Orange
+        'CANCELLED': { light: '#FF3B30', dark: '#FF453A' }, // Rouge
+        'BOARDING': { light: '#5856D6', dark: '#5E5CE6' }, // Violet
+        'DEPARTED': { light: '#1776BA', dark: '#1776BA' }, // Bleu
+        'ARRIVED': { light: '#34C759', dark: '#30D158' }, // Vert
+        'IN_TRANSIT': { light: '#FF9500', dark: '#FF9F0A' }, // Orange
+        'COMPLETED': { light: '#34C759', dark: '#30D158' }, // Vert
+        'PENDING': { light: '#FF9500', dark: '#FF9F0A' }, // Orange
+        'CONFIRMED': { light: '#34C759', dark: '#30D158' }, // Vert
+        'AVAILABLE': { light: '#34C759', dark: '#30D158' }, // Vert
+        'FULL': { light: '#FF3B30', dark: '#FF453A' }, // Rouge
+        'CLOSED': { light: '#8E8E93', dark: '#98989D' }, // Gris
+    };
+
+    /**
+     * Convertit un statut technique en libellé français lisible
+     * @param status - Le statut technique (ex: "SCHEDULED")
+     * @returns Le libellé français correspondant ou le statut original si non trouvé
+    */
+    const getStatusLabel = (status?: string): string => {
+        if (!status) return '--';
+
+        // Vérifie si le statut contient déjà un libellé formaté (ex: "Retard: 15min")
+        if (status.includes('Retard:')) {
+            return status;
+        }
+
+        // Convertit en majuscules pour la recherche insensible à la casse
+        const upperStatus = status.toUpperCase();
+
+        // Retourne le libellé correspondant ou le statut original
+        return STATUS_MAPPING[upperStatus] || status;
+    };
+
+    /**
+     * Récupère la couleur associée à un statut selon le thème
+     * @param status - Le statut technique (ex: "SCHEDULED")
+     * @param isDark - Indique si le thème est sombre
+     * @returns La couleur correspondante ou une couleur par défaut
+    */
+    const getStatusColor = (status?: string, isDark: boolean = false): string => {
+        if (!status) return isDark ? '#98989D' : '#8E8E93';
+
+        // Pour les statuts avec formatage spécial (ex: "Retard: 15min")
+        if (status.includes('Retard:')) {
+            return isDark ? '#FF9F0A' : '#FF9500';
+        }
+
+        // Convertit en majuscules pour la recherche insensible à la casse
+        const upperStatus = status.toUpperCase();
+        const colorMapping = STATUS_COLOR_MAPPING[upperStatus];
+
+        // Retourne la couleur correspondante ou une couleur par défaut
+        return colorMapping
+            ? (isDark ? colorMapping.dark : colorMapping.light)
+            : (isDark ? '#98989D' : '#8E8E93');
     };
 
     return (
@@ -134,12 +240,6 @@ export default function DepartureDetailsScreen() {
                         Détails du trajet
                     </ThemedText>
 
-                    {/* <TouchableOpacity
-                        style={[styles.headerButton, { backgroundColor: 'rgba(255, 255, 255, 0.2)' }]}
-                        onPress={handleOptions}
-                    >
-                        <MaterialIcons name="more-horiz" size={24} color="#FFFFFF" />
-                    </TouchableOpacity> */}
                 </View>
             </View>
 
@@ -168,6 +268,7 @@ export default function DepartureDetailsScreen() {
                                 <ThemedText style={[styles.busType, { color: primaryTextColor }]}>
                                     {departure.busType?.charAt(0).toUpperCase() + (departure.busType?.slice(1) || '') || departure.line?.charAt(0).toUpperCase() + (departure.line?.slice(1) || '') || 'Bus'}
                                 </ThemedText>
+                                <ThemedText style={[styles.busLicensePlate, { color: primaryTextColor }]}>{departure.busLicensePlate}</ThemedText>
                             </View>
                         </View>
                     </View>
@@ -178,9 +279,9 @@ export default function DepartureDetailsScreen() {
                         <View style={styles.routeVisualization}>
                             {/* Point de départ - en haut centré */}
                             <View style={[
-                                { 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center', 
+                                {
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
                                     flexDirection: 'row',
                                     gap: 10,
                                     // width: '100%',
@@ -189,7 +290,7 @@ export default function DepartureDetailsScreen() {
                                 <View style={[styles.routePointCircle, { backgroundColor: 'green', borderColor: borderColor }]}>
                                     <MaterialIcons name="location-on" size={16} color="#FFFFFF" />
                                 </View>
-                                <View style={styles.routePointContentCenter}>
+                                <View style={[styles.routePointContentCenter, { alignItems: 'flex-start' }]}>
                                     <ThemedText style={[styles.cityNameCenter, { color: primaryTextColor }]}>
                                         {departure.departureCity?.toUpperCase() || 'Ville'}
                                     </ThemedText>
@@ -221,7 +322,7 @@ export default function DepartureDetailsScreen() {
                                 <View style={[styles.routePointCircle, { backgroundColor: '#b81414', borderColor: borderColor }]}>
                                     <MaterialIcons name="location-on" size={16} color="#FFFFFF" />
                                 </View>
-                                <View style={styles.routePointContentCenter}>
+                                <View style={[styles.routePointContentCenter, { alignItems: 'flex-start' }]}>
                                     <ThemedText style={[styles.cityNameCenter, { color: primaryTextColor }]}>
                                         {departure.arrivalCity?.toUpperCase() || 'Ville'}
                                     </ThemedText>
@@ -261,15 +362,18 @@ export default function DepartureDetailsScreen() {
                                     Classe
                                 </ThemedText>
                                 <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                    {departure.classStatus || 'Économique'}
+                                    {departure.busType?.split(' ')[0]?.toUpperCase() || departure.line?.split(' ')[0]?.toUpperCase() || 'BUS'}
                                 </ThemedText>
                             </View>
                             <View style={[styles.detailColumn, { alignItems: 'flex-end' }]}>
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor, textAlign: 'center' }]}>
-                                    Terminal
+                                    Vehicule
                                 </ThemedText>
                                 <ThemedText style={[styles.detailValue, { color: primaryTextColor, textAlign: 'center' }]}>
-                                    {departure.departureStationName || 'N/A'}
+                                    {departure.busType?.split(' ')[1]?.toUpperCase() || departure.line?.split(' ')[1]?.toUpperCase() || 'BUS'}
+                                </ThemedText>
+                                <ThemedText style={[styles.detailValue, { color: primaryTextColor, textAlign: 'center' }]}>
+                                    {departure.busLicensePlate || 'N/A'}
                                 </ThemedText>
                             </View>
                         </View>
@@ -291,8 +395,8 @@ export default function DepartureDetailsScreen() {
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor, textAlign: 'center' }]}>
                                     Statut
                                 </ThemedText>
-                                <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                    {departure.status?.charAt(0).toUpperCase() + (departure.status?.slice(1) || '') || 'N/A'}
+                                <ThemedText style={[styles.detailValue, { color: getStatusColor(departure.status) }]}>
+                                    { getStatusLabel(departure.status) || 'N/A'}
                                 </ThemedText>
                             </View>
                         </View>
@@ -373,7 +477,7 @@ export default function DepartureDetailsScreen() {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.downloadButton, { backgroundColor: "#1776BA" }]}
-                            onPress={handleDownload}
+                            onPress={handleStartTraject}
                         >
                             <MaterialIcons name="directions-bus-filled" size={24} color="#FFFFFF" />
                             <ThemedText style={styles.downloadButtonText}>Démarrer</ThemedText>
@@ -453,6 +557,10 @@ const styles = StyleSheet.create({
     busType: {
         fontSize: 18,
         fontFamily: 'Ubuntu_Bold',
+    },
+    busLicensePlate: {
+        fontSize: 12,
+        fontFamily: 'Ubuntu_Regular',
     },
     // Section médiane
     middleSection: {

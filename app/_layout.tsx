@@ -28,11 +28,16 @@ function AppContent() {
                 <Stack.Screen name="login/index" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-qr/index" options={{ headerShown: false }} />
+                <Stack.Screen name="scan-result/index" options={{ headerShown: false }} />
                 <Stack.Screen name="departure-details/index" options={{ headerShown: false }} />
+                <Stack.Screen name="track-route/index" options={{ headerShown: false }} />
                 <Stack.Screen name="profile/index" options={{ headerShown: false }} />
                 {/* <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} /> */}
             </Stack>
-            <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+            <StatusBar
+                style={colorScheme === 'dark' ? 'light' : 'dark'}
+                backgroundColor={colorScheme === 'dark' ? '#121212' : '#ffffff'}
+            />
         </NavigationThemeProvider>
     );
 }
@@ -65,7 +70,7 @@ export default function RootLayout() {
                 console.warn('Splash déjà caché:', error);
             }
         };
-        
+
         hideSplash();
     }, [fontsLoaded, fontsError]);
 

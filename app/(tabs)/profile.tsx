@@ -1,8 +1,8 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -27,7 +27,6 @@ export default function ProfileScreen() {
     const secondaryTextColor = isDark ? '#9BA1A6' : '#666666';
     const borderColor = isDark ? '#3A3A3C' : '#E0E0E0';
     const separatorColor = isDark ? '#3A3A3C' : '#E5E5E5';
-    const selectedColor = '#1776BA';
     const buttonDangerColor = '#FF3B30';
 
     /**
@@ -73,21 +72,19 @@ export default function ProfileScreen() {
     };
 
     /**
-     * Change la préférence de thème
-     * @param preference - La nouvelle préférence de thème
+     * Bascule entre le mode clair et sombre
+     * @param value - true pour dark, false pour light
      */
-    const handleThemeChange = async (preference: ThemePreference) => {
-        await setThemePreference(preference);
+    const handleThemeToggle = async (value: boolean) => {
+        const newPreference: ThemePreference = value ? 'dark' : 'light';
+        await setThemePreference(newPreference);
     };
 
     /**
-     * Options de thème disponibles
+     * Détermine si le switch doit être activé
+     * Si la préférence est 'system', on se base sur le thème actuel
      */
-    const themeOptions: { value: ThemePreference; label: string; icon: keyof typeof MaterialIcons.glyphMap }[] = [
-        { value: 'light', label: 'Clair', icon: 'wb-sunny' },
-        { value: 'dark', label: 'Sombre', icon: 'brightness-2' },
-        { value: 'system', label: 'Système', icon: 'brightness-4' },
-    ];
+    const isDarkModeEnabled = themePreference === 'dark' || (themePreference === 'system' && isDark);
 
     return (
         <View style={[styles.container, { backgroundColor }]}>
@@ -126,55 +123,33 @@ export default function ProfileScreen() {
                         Apparence
                     </ThemedText>
                     <ThemedText style={[styles.sectionDescription, { color: secondaryTextColor }]}>
-                        Choisissez votre thème préféré
+                        Configurer l'apparence de l'application
                     </ThemedText>
 
-                    <View style={styles.themeOptionsContainer}>
-                        {themeOptions.map((option) => {
-                            const isSelected = themePreference === option.value;
-                            return (
-                                <TouchableOpacity
-                                    key={option.value}
-                                    style={[
-                                        styles.themeOption,
-                                        {
-                                            backgroundColor: isSelected
-                                                ? selectedColor
-                                                : isDark
-                                                ? '#2A2A2A'
-                                                : '#F5F5F5',
-                                            borderColor: isSelected ? selectedColor : borderColor,
-                                        },
-                                    ]}
-                                    onPress={() => handleThemeChange(option.value)}
-                                    disabled={isLoading}
-                                >
-                                    <MaterialIcons
-                                        name={option.icon}
-                                        size={24}
-                                        color={isSelected ? '#FFFFFF' : primaryTextColor}
-                                    />
-                                    <ThemedText
-                                        style={[
-                                            styles.themeOptionText,
-                                            {
-                                                color: isSelected ? '#FFFFFF' : primaryTextColor,
-                                            },
-                                        ]}
-                                    >
-                                        {option.label}
+                    <View style={[styles.switchContainer, { borderTopColor: separatorColor }]}>
+                        <View style={styles.switchContent}>
+                            <View style={styles.switchLabelContainer}>
+                                <MaterialCommunityIcons
+                                    name={isDarkModeEnabled ? "weather-night" : "weather-sunny"}
+                                    size={24}
+                                    color={isDarkModeEnabled ? "#FFA726" : "#FFC107"}
+                                />
+                                <View style={styles.themeToggleTextContainer}>
+                                    <ThemedText style={[styles.themeToggleLabel, { color: primaryTextColor }]}>Mode sombre</ThemedText>
+                                    <ThemedText style={[styles.themeToggleDescription, { color: secondaryTextColor }]}>
+                                        {isDarkModeEnabled ? 'Activé' : 'Désactivé'}
                                     </ThemedText>
-                                    {isSelected && (
-                                        <MaterialIcons
-                                            name="check"
-                                            size={20}
-                                            color="#FFFFFF"
-                                            style={styles.checkIcon}
-                                        />
-                                    )}
-                                </TouchableOpacity>
-                            );
-                        })}
+                                </View>
+                            </View>
+                            <Switch
+                                value={isDarkModeEnabled}
+                                onValueChange={handleThemeToggle}
+                                disabled={isLoading}
+                                trackColor={{ false: '#E0E0E0', true: '#1776BA' }}
+                                thumbColor={isDarkModeEnabled ? '#FFFFFF' : '#F4F3F4'}
+                                ios_backgroundColor="#E0E0E0"
+                            />
+                        </View>
                     </View>
                 </View>
 
@@ -249,24 +224,25 @@ const styles = StyleSheet.create({
         fontFamily: 'Ubuntu_Regular',
         marginBottom: 20,
     },
-    themeOptionsContainer: {
-        gap: 12,
+    switchContainer: {
+        paddingTop: 16,
+        borderTopWidth: 1,
+        marginTop: 8,
     },
-    themeOption: {
+    switchContent: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 2,
-        gap: 12,
+        justifyContent: 'space-between',
     },
-    themeOptionText: {
+    switchLabelContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
         flex: 1,
+    },
+    switchLabel: {
         fontSize: 16,
         fontFamily: 'Ubuntu_Medium',
-    },
-    checkIcon: {
-        marginLeft: 'auto',
     },
     logoutButton: {
         paddingTop: 16,
@@ -281,5 +257,33 @@ const styles = StyleSheet.create({
     logoutButtonText: {
         fontSize: 16,
         fontFamily: 'Ubuntu_Medium',
+    },
+
+    themeToggleCard: {
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    themeToggleContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        flex: 1,
+    },
+    themeToggleTextContainer: {
+        flex: 1,
+    },
+    themeToggleLabel: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Medium',
+        marginBottom: 4,
+    },
+    themeToggleDescription: {
+        fontSize: 12,
+        fontFamily: 'Ubuntu_Regular',
     },
 });

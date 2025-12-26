@@ -3,9 +3,23 @@ import { Departure, DepartureCard } from '@/components/departure-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -46,6 +60,78 @@ interface PaginatedResponse {
     page: string;
     pageSize: string;
 }
+
+/**
+ * Type pour les options de filtre de date
+ */
+type DateFilterType = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom';
+
+/**
+ * Calcule les dates de début et de fin selon le type de filtre
+ */
+const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customDateTo?: Date): { dateFrom: Date | null; dateTo: Date | null } => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    switch (filterType) {
+        case 'today':
+            // Pour aujourd'hui, on met la même date dans les deux paramètres
+            return {
+                dateFrom: today,
+                dateTo: today,
+            };
+        
+        case 'thisWeek':
+            const dayOfWeek = now.getDay();
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - dayOfWeek);
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+            return {
+                dateFrom: startOfWeek,
+                dateTo: endOfWeek,
+            };
+        
+        case 'thisMonth':
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            return {
+                dateFrom: startOfMonth,
+                dateTo: endOfMonth,
+            };
+        
+        case 'thisYear':
+            const startOfYear = new Date(now.getFullYear(), 0, 1);
+            const endOfYear = new Date(now.getFullYear(), 11, 31);
+            return {
+                dateFrom: startOfYear,
+                dateTo: endOfYear,
+            };
+        
+        case 'custom':
+            if (customDateFrom && customDateTo) {
+                const from = new Date(customDateFrom);
+                from.setHours(0, 0, 0, 0);
+                const to = new Date(customDateTo);
+                to.setHours(23, 59, 59, 999);
+                return {
+                    dateFrom: from,
+                    dateTo: to,
+                };
+            }
+            return { dateFrom: null, dateTo: null };
+        
+        default:
+            return { dateFrom: null, dateTo: null };
+    }
+};
+
+/**
+ * Formate une date pour l'API (format ISO)
+ */
+const formatDateForApi = (date: Date): string => {
+    return date.toISOString().split('T')[0];
+};
 
 /**
  * Extrait un code de station (3 lettres) depuis un nom de station
@@ -168,7 +254,7 @@ const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): Departure
         // Nouvelles propriétés pour le nouveau design
         company: apiDeparture.company.name,
         busType: `${apiDeparture.bus.busType} ${apiDeparture.bus.mark}`,
-        classStatus: 'Economy Class',
+        // classStatus: 'Economy Class',
         departureStationCode: departureStationCode,
         departureStationName: apiDeparture.trip.stationFrom.name,
         departureCity: departureCity,
@@ -189,11 +275,12 @@ const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): Departure
         seatsAvailable: apiDeparture.seatsAvailable,
         seatsBooked: apiDeparture.seatsBooked,
         status: statusText,
+        busLicensePlate: apiDeparture.bus.licencePlate,
     };
 };
 
 /**
- * Écran d'accueil affichant la liste des départs avec pagination
+ * Écran d'accueil affichant la liste des départs avec pagination et filtrage par date
  */
 export default function HomeScreen() {
     const colorScheme = useColorScheme();
@@ -210,8 +297,19 @@ export default function HomeScreen() {
     const [hasMore, setHasMore] = useState(true);
     const pageSize = 10;
 
+    // États pour le filtre de date
+    const [dateFilter, setDateFilter] = useState<DateFilterType>('all');
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showDatePickerFrom, setShowDatePickerFrom] = useState(false);
+    const [showDatePickerTo, setShowDatePickerTo] = useState(false);
+    const [customDateFrom, setCustomDateFrom] = useState<Date>(new Date());
+    const [customDateTo, setCustomDateTo] = useState<Date>(new Date());
+    const [showFilterModal, setShowFilterModal] = useState(false);
+    // État pour suivre si les dates custom sont complètes
+    const [customDatesReady, setCustomDatesReady] = useState(false);
+
     /**
-     * Charge les départs depuis l'API
+     * Charge les départs depuis l'API avec filtrage par date
      * @param page - Numéro de la page à charger
      * @param isRefresh - Indique si c'est un refresh (réinitialise la liste)
      */
@@ -234,15 +332,30 @@ export default function HomeScreen() {
                 setError('Vous devez être connecté pour voir vos trajets');
                 setLoading(false);
                 setRefreshing(false);
+                router.replace('/login');
+                Alert.alert('Attention !', 'Vous devez être connecté pour voir vos trajets');
                 return;
             }
 
-            const queryParams = `driverId=${userId}&pageSize=${pageSize}&page=${page}`;
+            // Construire les paramètres de requête
+            let queryParams = `driverId=${userId}&pageSize=${pageSize}&page=${page}`;
+            
+            // Ajouter les paramètres de date si un filtre est sélectionné
+            if (dateFilter !== 'all') {
+                const { dateFrom, dateTo } = getDateRange(dateFilter, customDateFrom, customDateTo);
+                if (dateFrom && dateTo) {
+                    queryParams += `&dateFrom=${formatDateForApi(dateFrom)}&dateTo=${formatDateForApi(dateTo)}`;
+                }
+            }
+
+            setDepartures([]);
             const response = await getUserDeparturesApi(queryParams, token);
             const data: PaginatedResponse = response.data;
 
             if (data?.items && Array.isArray(data.items)) {
-                const transformedDepartures = data.items.map(transformApiDepartureToDeparture);
+                console.log('data.items departures ==>, ', data.items);
+
+                const transformedDepartures = data.items.map(transformApiDepartureToDeparture).reverse();
                 
                 if (isRefresh || page === 1) {
                     // Remplacer la liste pour la première page ou lors du refresh
@@ -277,7 +390,7 @@ export default function HomeScreen() {
             setLoadingMore(false);
             setRefreshing(false);
         }
-    }, [pageSize]);
+    }, [pageSize, dateFilter, customDateFrom, customDateTo]);
 
     /**
      * Gère le pull-to-refresh
@@ -299,11 +412,126 @@ export default function HomeScreen() {
     }, [currentPage, hasMore, loadingMore, loading, refreshing, loadDepartures]);
 
     /**
-     * Charge les départs au montage du composant
+     * Charge les départs au montage du composant et quand le filtre change
+     * Ne charge pas automatiquement pour le filtre 'custom'
      */
     useEffect(() => {
+        // Ne pas charger automatiquement pour le filtre custom
+        // Le chargement sera déclenché manuellement après la sélection des deux dates
+        if (dateFilter === 'custom' && !customDatesReady) {
+            return;
+        }
+        
+        setCurrentPage(1);
+        setHasMore(true);
         loadDepartures(1, false);
-    }, [loadDepartures]);
+    }, [loadDepartures, dateFilter, customDatesReady]);
+
+    /**
+     * Gère le changement de filtre de date
+     */
+    const handleDateFilterChange = (filter: DateFilterType) => {
+        setDateFilter(filter);
+        setShowFilterModal(false);
+        setCustomDatesReady(false); // Réinitialiser l'état des dates custom
+        
+        if (filter === 'custom') {
+            // Initialiser les dates personnalisées si elles ne sont pas définies
+            const today = new Date();
+            setCustomDateFrom(today);
+            setCustomDateTo(today);
+            setShowDatePickerFrom(true);
+            // Ne pas charger immédiatement, attendre la sélection des deux dates
+        } else {
+            // Pour les autres filtres, vider la liste et afficher le loader immédiatement
+            setDepartures([]); // Vider la liste immédiatement
+            setLoading(true);
+            setError(null);
+            setCurrentPage(1);
+            setHasMore(true);
+            // Le useEffect se chargera du chargement
+        }
+    };
+
+    /**
+     * Gère la sélection d'une date de début personnalisée
+     */
+    const handleCustomDateFromSelect = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowDatePickerFrom(false);
+        }
+        if (selectedDate) {
+            setCustomDateFrom(selectedDate);
+            // Sur iOS, on attend la confirmation via le bouton
+            if (Platform.OS === 'android') {
+                // Ouvrir automatiquement le sélecteur de date de fin sur Android
+                setTimeout(() => setShowDatePickerTo(true), 100);
+            }
+        }
+    };
+
+    /**
+     * Gère la sélection d'une date de fin personnalisée
+     * Déclenche le chargement une fois les deux dates sélectionnées
+     */
+    const handleCustomDateToSelect = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowDatePickerTo(false);
+        }
+        if (selectedDate) {
+            setCustomDateTo(selectedDate);
+            // Marquer les dates comme prêtes et déclencher le chargement
+            setCustomDatesReady(true);
+        }
+    };
+
+    /**
+     * Réinitialise le filtre
+     */
+    const handleResetFilter = () => {
+        setDateFilter('all');
+        setShowFilterModal(false);
+    };
+
+    /**
+     * Obtient le label du filtre actif
+     */
+    const getFilterLabel = (): string => {
+        switch (dateFilter) {
+            case 'today':
+                return "Aujourd'hui";
+            case 'thisWeek':
+                return 'Cette semaine';
+            case 'thisMonth':
+                return 'Ce mois';
+            case 'thisYear':
+                return 'Cette année';
+            case 'custom':
+                if (customDateFrom && customDateTo) {
+                    const fromStr = customDateFrom.toLocaleDateString('fr-FR', {
+                        day: 'numeric',
+                        month: 'short',
+                    });
+                    const toStr = customDateTo.toLocaleDateString('fr-FR', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                    });
+                    // Si c'est la même date, afficher une seule date
+                    if (customDateFrom.getTime() === customDateTo.getTime()) {
+                        return customDateFrom.toLocaleDateString('fr-FR', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                        });
+                    }
+                    return `${fromStr} - ${toStr}`;
+                }
+                return 'Date spécifique';
+            default:
+                return 'Tous les trajets';
+        }
+    };
 
     /**
      * Gère le clic sur le bouton ticket
@@ -347,7 +575,7 @@ export default function HomeScreen() {
      * Rend le contenu vide ou l'état de chargement
      */
     const renderEmpty = () => {
-        if (loading) {
+        if (loading || refreshing) {
             return (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
@@ -371,6 +599,83 @@ export default function HomeScreen() {
         );
     };
 
+    /**
+     * Rend le modal de sélection de filtre
+     */
+    const renderFilterModal = () => {
+        const filterOptions: { type: DateFilterType; label: string }[] = [
+            { type: 'all', label: 'Tous les trajets' },
+            { type: 'today', label: "Aujourd'hui" },
+            { type: 'thisWeek', label: 'Cette semaine' },
+            { type: 'thisMonth', label: 'Ce mois' },
+            { type: 'thisYear', label: 'Cette année' },
+            { type: 'custom', label: 'Date spécifique' },
+        ];
+
+        return (
+            <Modal
+                visible={showFilterModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowFilterModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}>
+                        <View style={styles.modalHeader}>
+                            <ThemedText type="title" style={styles.modalTitle}>Filtrer par date</ThemedText>
+                            <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+                                <MaterialIcons name="close" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        <ScrollView style={styles.filterOptions}>
+                            {filterOptions.map((option) => (
+                                <TouchableOpacity
+                                    key={option.type}
+                                    style={[
+                                        styles.filterOption,
+                                        dateFilter === option.type && styles.filterOptionActive,
+                                        { 
+                                            backgroundColor: dateFilter === option.type 
+                                                ? (isDark ? '#2C2C2E' : '#F3F3F7') 
+                                                : 'transparent' 
+                                        }
+                                    ]}
+                                    onPress={() => handleDateFilterChange(option.type)}
+                                >
+                                    <ThemedText 
+                                        style={[
+                                            styles.filterOptionText,
+                                            dateFilter === option.type && styles.filterOptionTextActive
+                                        ]}
+                                    >
+                                        {option.label}
+                                    </ThemedText>
+                                    {dateFilter === option.type && (
+                                        <MaterialIcons 
+                                            name="check" 
+                                            size={20} 
+                                            color={isDark ? '#FFFFFF' : '#000000'} 
+                                        />
+                                    )}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+
+                        <View style={styles.modalFooter}>
+                            <TouchableOpacity
+                                style={[styles.resetButton, { backgroundColor: isDark ? '#2C2C2E' : '#F3F3F7' }]}
+                                onPress={handleResetFilter}
+                            >
+                                <ThemedText style={styles.resetButtonText}>Réinitialiser</ThemedText>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+        );
+    };
+
     const backgroundColor = isDark ? '#000000' : '#F3F3F7';
     const headerBackgroundColor = isDark ? '#000000' : '#F3F3F7';
 
@@ -387,6 +692,22 @@ export default function HomeScreen() {
                 ]}
             >
                 <ThemedText type="title" style={styles.title}>Mes trajets</ThemedText>
+                
+                {/* Bouton de filtre */}
+                <TouchableOpacity
+                    style={[styles.filterButton, { backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA' }]}
+                    onPress={() => setShowFilterModal(true)}
+                >
+                    <MaterialIcons 
+                        name="filter-list" 
+                        size={20} 
+                        color={isDark ? '#FFFFFF' : '#000000'} 
+                    />
+                    <ThemedText style={styles.filterButtonText}>{getFilterLabel()}</ThemedText>
+                    {dateFilter !== 'all' && (
+                        <View style={[styles.filterBadge, { backgroundColor: isDark ? '#1776BA' : '#1776BA' }]} />
+                    )}
+                </TouchableOpacity>
             </ThemedView>
 
             {/* Liste avec pagination et pull-to-refresh */}
@@ -395,8 +716,8 @@ export default function HomeScreen() {
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={[
-                    loading ? styles.contentContainerLoading : styles.contentContainer,
-                    departures.length === 0 && !loading && styles.emptyContainer
+                    (loading || refreshing) ? styles.contentContainerLoading : styles.contentContainer,
+                    departures.length === 0 && !loading && !refreshing && styles.emptyContainer
                 ]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
@@ -414,6 +735,132 @@ export default function HomeScreen() {
                 maxToRenderPerBatch={10}
                 windowSize={10}
             />
+
+            {/* Modal de filtre */}
+            {renderFilterModal()}
+
+            {/* DatePicker pour date personnalisée - Date de début */}
+            {Platform.OS === 'ios' && showDatePickerFrom && (
+                <Modal
+                    visible={showDatePickerFrom}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={() => setShowDatePickerFrom(false)}
+                >
+                    <View style={styles.datePickerOverlay}>
+                        <View style={[styles.datePickerContainer, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}>
+                            <View style={styles.datePickerHeader}>
+                                <ThemedText type="title" style={styles.datePickerTitle}>Sélectionner la date de début</ThemedText>
+                                <TouchableOpacity onPress={() => setShowDatePickerFrom(false)}>
+                                    <MaterialIcons name="close" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.datePickerContent}>
+                                <DateTimePicker
+                                    value={customDateFrom}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={handleCustomDateFromSelect}
+                                    maximumDate={new Date()}
+                                    textColor={isDark ? '#FFFFFF' : '#000000'}
+                                    themeVariant={isDark ? 'dark' : 'light'}
+                                />
+                            </View>
+                            <View style={styles.datePickerFooter}>
+                                <TouchableOpacity
+                                    style={[styles.datePickerButton, { backgroundColor: isDark ? '#2C2C2E' : '#F3F3F7' }]}
+                                    onPress={() => setShowDatePickerFrom(false)}
+                                >
+                                    <ThemedText style={styles.datePickerButtonText}>Annuler</ThemedText>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.datePickerButton, styles.datePickerButtonPrimary, { backgroundColor: isDark ? '#0A84FF' : '#007AFF' }]}
+                                    onPress={() => {
+                                        setShowDatePickerFrom(false);
+                                        setTimeout(() => setShowDatePickerTo(true), 100);
+                                    }}
+                                >
+                                    <ThemedText style={[styles.datePickerButtonText, styles.datePickerButtonTextPrimary]}>Confirmer</ThemedText>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            )}
+
+            {/* DatePicker Android - Date de début (sans Modal) */}
+            {Platform.OS === 'android' && showDatePickerFrom && (
+                <DateTimePicker
+                    value={customDateFrom}
+                    mode="date"
+                    display="default"
+                    onChange={handleCustomDateFromSelect}
+                    maximumDate={new Date()}
+                />
+            )}
+
+            {/* DatePicker pour date personnalisée - Date de fin */}
+            {Platform.OS === 'ios' && showDatePickerTo && (
+                <Modal
+                    visible={showDatePickerTo}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={() => setShowDatePickerTo(false)}
+                >
+                    <View style={styles.datePickerOverlay}>
+                        <View style={[styles.datePickerContainer, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}>
+                            <View style={styles.datePickerHeader}>
+                                <ThemedText type="title" style={styles.datePickerTitle}>Sélectionner la date de fin</ThemedText>
+                                <TouchableOpacity onPress={() => setShowDatePickerTo(false)}>
+                                    <MaterialIcons name="close" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.datePickerContent}>
+                                <DateTimePicker
+                                    value={customDateTo}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={handleCustomDateToSelect}
+                                    minimumDate={customDateFrom}
+                                    maximumDate={new Date()}
+                                    textColor={isDark ? '#FFFFFF' : '#000000'}
+                                    themeVariant={isDark ? 'dark' : 'light'}
+                                />
+                            </View>
+                            <View style={styles.datePickerFooter}>
+                                <TouchableOpacity
+                                    style={[styles.datePickerButton, { backgroundColor: isDark ? '#2C2C2E' : '#F3F3F7' }]}
+                                    onPress={() => setShowDatePickerTo(false)}
+                                >
+                                    <ThemedText style={styles.datePickerButtonText}>Annuler</ThemedText>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.datePickerButton, styles.datePickerButtonPrimary, { backgroundColor: isDark ? '#0A84FF' : '#007AFF' }]}
+                                    onPress={() => {
+                                        setShowDatePickerTo(false);
+                                        // Marquer les dates comme prêtes et déclencher le chargement
+                                        setCustomDatesReady(true);
+                                    }}
+                                >
+                                    <ThemedText style={[styles.datePickerButtonText, styles.datePickerButtonTextPrimary]}>Confirmer</ThemedText>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            )}
+
+            {/* DatePicker Android - Date de fin (sans Modal) */}
+            {Platform.OS === 'android' && showDatePickerTo && (
+                <DateTimePicker
+                    value={customDateTo}
+                    mode="date"
+                    display="default"
+                    onChange={handleCustomDateToSelect}
+                    minimumDate={customDateFrom}
+                    maximumDate={new Date()}
+                />
+            )}
         </View>
     );
 }
@@ -430,6 +877,26 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 32,
         fontFamily: 'Ubuntu_Bold',
+        marginBottom: 12,
+    },
+    filterButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        alignSelf: 'flex-start',
+    },
+    filterButtonText: {
+        marginLeft: 8,
+        fontSize: 14,
+        fontFamily: 'Ubuntu_Medium',
+    },
+    filterBadge: {
+        width: 10,
+        height: 10,
+        borderRadius: 100,
+        marginLeft: 8,
     },
     contentContainer: {
         padding: 16,
@@ -437,12 +904,15 @@ const styles = StyleSheet.create({
     },
     contentContainerLoading: {
         flexGrow: 1,
+        minHeight: '100%',
         justifyContent: 'center',
         alignItems: 'center',
     },
     loadingContainer: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        minHeight: '100%',
     },
     loadingText: {
         marginTop: 16,
@@ -482,5 +952,121 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: 'Ubuntu_Regular',
         marginLeft: 8,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingTop: 20,
+        paddingBottom: 40,
+        maxHeight: '80%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingBottom: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+    },
+    modalTitle: {
+        fontSize: 24,
+        fontFamily: 'Ubuntu_Bold',
+    },
+    filterOptions: {
+        paddingHorizontal: 20,
+        paddingTop: 20,
+    },
+    filterOption: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+        marginBottom: 8,
+    },
+    filterOptionActive: {
+        // Style déjà géré par backgroundColor dynamique
+    },
+    filterOptionText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Regular',
+    },
+    filterOptionTextActive: {
+        fontFamily: 'Ubuntu_Medium',
+    },
+    modalFooter: {
+        paddingHorizontal: 20,
+        paddingTop: 20,
+    },
+    resetButton: {
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    resetButtonText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Medium',
+    },
+    datePickerOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'flex-end',
+    },
+    datePickerContainer: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingTop: 20,
+        paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+        maxHeight: '80%',
+    },
+    datePickerHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingBottom: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+    },
+    datePickerTitle: {
+        fontSize: 20,
+        fontFamily: 'Ubuntu_Bold',
+    },
+    datePickerContent: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 20,
+    },
+    datePickerFooter: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingTop: 20,
+        gap: 12,
+    },
+    datePickerButton: {
+        flex: 1,
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    datePickerButtonPrimary: {
+        // Style pour le bouton primaire
+    },
+    datePickerButtonText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Medium',
+    },
+    datePickerButtonTextPrimary: {
+        color: '#FFFFFF',
     },
 });

@@ -116,7 +116,7 @@ const Index = () => {
         const logoSource = colorScheme === 'dark' 
             ? require('@/assets/images/onboarding/logo-allon-blanc.png')
             : require('@/assets/images/allon-logo-transparent.png');
-
+        const proTextColor = colorScheme === 'dark' ? '#FFFFFF' : '#000000';
         return (
             <View style={[styles.container, { backgroundColor }]}>
                 <View style={styles.logoContainer}>
@@ -125,7 +125,7 @@ const Index = () => {
                         style={styles.logo}
                         resizeMode="contain"
                     />
-                    <Text style={[styles.proText, { color: "#1776BA" }]}>PRO</Text>
+                    <Text style={[styles.proText, { color: textColor }]}>PRO</Text>
                 </View>
             </View>
         );
