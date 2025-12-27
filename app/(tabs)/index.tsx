@@ -348,21 +348,30 @@ export default function HomeScreen() {
                 }
             }
 
-            setDepartures([]);
+            // NE VIDER LA LISTE QUE POUR LA PAGE 1 OU LORS D'UN REFRESH
+            if (isRefresh || page === 1) {
+                setDepartures([]);
+            }
+
             const response = await getUserDeparturesApi(queryParams, token);
             const data: PaginatedResponse = response.data;
 
             if (data?.items && Array.isArray(data.items)) {
                 console.log('data.items departures ==>, ', data.items);
 
-                const transformedDepartures = data.items.map(transformApiDepartureToDeparture).reverse();
+                const transformedDepartures = data.items.map(transformApiDepartureToDeparture);
                 
                 if (isRefresh || page === 1) {
                     // Remplacer la liste pour la première page ou lors du refresh
                     setDepartures(transformedDepartures);
                 } else {
-                    // Ajouter les nouveaux éléments à la liste existante
-                    setDepartures(prev => [...prev, ...transformedDepartures]);
+                    // Ajouter les nouveaux éléments à la liste existante SANS EFFACER LES PRÉCÉDENTS
+                    setDepartures(prev => {
+                        // Éviter les doublons en vérifiant les IDs
+                        const existingIds = new Set(prev.map(d => d.id));
+                        const newDepartures = transformedDepartures.filter(d => !existingIds.has(d.id));
+                        return [...prev, ...newDepartures];
+                    });
                 }
 
                 // Calculer le nombre total de pages
@@ -405,11 +414,16 @@ export default function HomeScreen() {
      * Charge la page suivante lors du scroll
      */
     const loadMore = useCallback(() => {
-        if (!loadingMore && hasMore && !loading && !refreshing) {
-            const nextPage = currentPage + 1;
+        // Vérifier qu'on peut charger plus et qu'on n'est pas déjà en train de charger
+        if (loadingMore || !hasMore || loading || refreshing) {
+            return;
+        }
+        
+        const nextPage = currentPage + 1;
+        if (nextPage <= totalPages) {
             loadDepartures(nextPage, false);
         }
-    }, [currentPage, hasMore, loadingMore, loading, refreshing, loadDepartures]);
+    }, [currentPage, hasMore, loadingMore, loading, refreshing, loadDepartures, totalPages]);
 
     /**
      * Charge les départs au montage du composant et quand le filtre change
@@ -716,8 +730,10 @@ export default function HomeScreen() {
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={[
-                    (loading || refreshing) ? styles.contentContainerLoading : styles.contentContainer,
-                    departures.length === 0 && !loading && !refreshing && styles.emptyContainer
+                    departures.length === 0 && !loading && !refreshing 
+                        ? styles.emptyContainer 
+                        : styles.contentContainer,
+                    (loading || refreshing) && departures.length === 0 && styles.contentContainerLoading
                 ]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
@@ -728,12 +744,9 @@ export default function HomeScreen() {
                     />
                 }
                 onEndReached={loadMore}
-                onEndReachedThreshold={0.5}
+                onEndReachedThreshold={0.2}
                 ListEmptyComponent={renderEmpty}
                 ListFooterComponent={renderFooter}
-                removeClippedSubviews={true}
-                maxToRenderPerBatch={10}
-                windowSize={10}
             />
 
             {/* Modal de filtre */}

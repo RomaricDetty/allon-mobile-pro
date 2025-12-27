@@ -1,9 +1,12 @@
+import { baseUrl } from '@/api/config';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { router, useLocalSearchParams } from 'expo-router';
-import React from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -49,6 +52,9 @@ const getStatusLabel = (status?: string): string => {
         'ARRIVED': 'Arrivé',
         'DEPARTED': 'Parti',
         'SCHEDULED': 'Programmé',
+        'VALIDATED': 'Validé',
+        'USED': 'Utilisé',
+        'EXPIRED': 'Expiré',
     };
     
     return STATUS_MAPPING[status.toUpperCase()] || status;
@@ -136,6 +142,41 @@ const getTripTypeLabel = (tripType?: string): string => {
 };
 
 /**
+ * Convertit le type de leg en libellé français
+ * @param leg - Le type de leg (ex: "OUTBOUND")
+ * @returns Le libellé français
+ */
+const getLegLabel = (leg?: string): string => {
+    if (!leg) return '--';
+    
+    const LEG_MAPPING: Record<string, string> = {
+        'OUTBOUND': 'Aller',
+        'INBOUND': 'Retour',
+    };
+    
+    return LEG_MAPPING[leg.toUpperCase()] || leg;
+};
+
+/**
+ * Convertit le type de passager en libellé français
+ * @param passengerType - Le type de passager (ex: "adult")
+ * @returns Le libellé français
+ */
+const getPassengerTypeLabel = (passengerType?: string): string => {
+    if (!passengerType) return '--';
+    
+    const PASSENGER_TYPE_MAPPING: Record<string, string> = {
+        'adult': 'Adulte',
+        'child': 'Enfant',
+        'senior': 'Senior',
+        'student': 'Étudiant',
+        'infant': 'Bébé',
+    };
+    
+    return PASSENGER_TYPE_MAPPING[passengerType.toLowerCase()] || passengerType;
+};
+
+/**
  * Écran de résultat du scan QR
  * Affiche les détails de la réservation validée
  */
@@ -144,6 +185,10 @@ export default function ScanResultScreen() {
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{ bookingData: string }>();
+
+    // État pour gérer les billets sélectionnés
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [isValidating, setIsValidating] = useState(false);
 
     // Parse les données de la réservation depuis les paramètres
     let bookingData: BookingData | null = null;
@@ -180,6 +225,120 @@ export default function ScanResultScreen() {
         router.back();
     };
 
+    /**
+     * Bascule la sélection d'un billet
+     * @param itemId - L'ID du billet à sélectionner/désélectionner
+     */
+    const toggleItemSelection = (itemId: string) => {
+        setSelectedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(itemId)) {
+                newSet.delete(itemId);
+            } else {
+                newSet.add(itemId);
+            }
+            return newSet;
+        });
+    };
+
+    /**
+     * Valide les billets sélectionnés
+     */
+    const handleValidateItems = async () => {
+        if (selectedItems.size === 0) {
+            Alert.alert('Aucun billet sélectionné', 'Veuillez sélectionner au moins un billet à valider.');
+            return;
+        }
+
+        Alert.alert(
+            'Confirmer la validation',
+            `Êtes-vous sûr de vouloir valider ${selectedItems.size} billet(s) ?`,
+            [
+                {
+                    text: 'Annuler',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Valider',
+                    onPress: async () => {
+                        setIsValidating(true);
+                        try {
+                            const token = await AsyncStorage.getItem('token');
+                            if (!token) {
+                                throw new Error('Token non disponible');
+                            }
+
+                            // Récupération du departureId
+                            const departureId = booking.departure?.id;
+                            if (!departureId) {
+                                throw new Error('ID du départ non disponible');
+                            }
+
+                            // Calcul du nombre total d'items validables
+                            const validatableItems = booking.items.filter((item: any) => item.canValidate === true);
+                            const totalValidatableCount = validatableItems.length;
+                            const selectedCount = selectedItems.size;
+
+                            // Formatage du body selon les règles
+                            let requestBody: {
+                                departureId: string;
+                                itemIds?: string[];
+                                validateAll?: boolean;
+                            } = {
+                                departureId,
+                            };
+
+                            // Cas 1 : Un seul élément sélectionné OU tous les éléments validables sont sélectionnés
+                            if (selectedCount === 1 || selectedCount === totalValidatableCount) {
+                                requestBody.validateAll = true;
+                            } else {
+                                // Cas 2 : Plusieurs éléments sélectionnés mais pas tous
+                                requestBody.itemIds = Array.from(selectedItems);
+                            }
+
+                            const response = await axios.post(
+                                `${baseUrl}/bookings/${booking.id}/validate-items`,
+                                requestBody,
+                                {
+                                    headers: {
+                                        Authorization: `Bearer ${token}`,
+                                    },
+                                }
+                            );
+
+                            console.log('response dans le handleValidateItems: ', JSON.stringify(response.data));
+
+                            if (response.data) {
+                                Alert.alert(
+                                    'Succès',
+                                    `${selectedItems.size} billet(s) validé(s) avec succès.`,
+                                    [
+                                        {
+                                            text: 'OK',
+                                            onPress: () => {
+                                                // Recharger les données ou retourner en arrière
+                                                router.back();
+                                            },
+                                        },
+                                    ]
+                                );
+                            }
+                        } catch (error: any) {
+                            console.error('Erreur lors de la validation:', error);
+                            Alert.alert(
+                                'Erreur',
+                                error.response?.data?.message || 'Une erreur est survenue lors de la validation des billets.',
+                                [{ text: 'OK' }]
+                            );
+                        } finally {
+                            setIsValidating(false);
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
     return (
         <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#F3F3F7' }]}>
             {/* Barre de navigation / En-tête */}
@@ -211,7 +370,10 @@ export default function ScanResultScreen() {
 
             <ScrollView
                 style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: selectedItems.size > 0 ? 100 : 10 },
+                ]}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Carte principale */}
@@ -261,7 +423,7 @@ export default function ScanResultScreen() {
                             Statut de la réservation
                         </ThemedText>
                         <View style={styles.statusRow}>
-                            <ThemedText style={[styles.statusLabel, { color: labelTextColor }]}>
+                            <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
                                 Statut
                             </ThemedText>
                             <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status, isDark) + '20' }]}>
@@ -327,7 +489,7 @@ export default function ScanResultScreen() {
                             
                             <View style={styles.detailRow}>
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Total d'articles
+                                    Total des billets
                                 </ThemedText>
                                 <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
                                     {booking.summary.totalItems || 0}
@@ -336,7 +498,7 @@ export default function ScanResultScreen() {
 
                             <View style={styles.detailRow}>
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Articles payés
+                                    Billets payés
                                 </ThemedText>
                                 <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
                                     {booking.summary.paidItems || 0}
@@ -345,7 +507,7 @@ export default function ScanResultScreen() {
 
                             <View style={styles.detailRow}>
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Articles utilisés
+                                    Billets utilisés
                                 </ThemedText>
                                 <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
                                     {booking.summary.usedItems || 0}
@@ -354,7 +516,7 @@ export default function ScanResultScreen() {
 
                             <View style={styles.detailRow}>
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Validation complète
+                                    Validation total des billets
                                 </ThemedText>
                                 <View style={[styles.statusBadge, { backgroundColor: (booking.summary.canValidateAll ? successColor : '#FF9500') + '20' }]}>
                                     <ThemedText style={[styles.statusText, { color: booking.summary.canValidateAll ? successColor : '#FF9500' }]}>
@@ -367,6 +529,147 @@ export default function ScanResultScreen() {
 
                     {/* Séparateur */}
                     <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+
+                    {/* Section : Liste des billets */}
+                    {booking.items && booking.items.length > 0 && (
+                        <>
+                            <View style={styles.section}>
+                                <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
+                                    Liste des billets ({booking.items.length})
+                                </ThemedText>
+                                
+                                {booking.items.map((item: any, index: number) => {
+                                    const isSelected = selectedItems.has(item.id);
+                                    const canSelect = item.canValidate === true;
+
+                                    return (
+                                        <TouchableOpacity
+                                            key={item.id || index}
+                                            activeOpacity={canSelect ? 0.7 : 1}
+                                            onPress={() => canSelect && toggleItemSelection(item.id)}
+                                            disabled={!canSelect}
+                                            style={[
+                                                styles.itemCard,
+                                                {
+                                                    backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5',
+                                                    borderColor: isSelected && canSelect 
+                                                        ? '#1776BA' 
+                                                        : borderColor,
+                                                    borderWidth: isSelected && canSelect ? 1 : 0.5,
+                                                    opacity: canSelect ? 1 : 0.6,
+                                                },
+                                            ]}
+                                        >
+                                            {/* En-tête du billet */}
+                                            <View style={styles.itemHeader}>
+                                                <View style={styles.itemHeaderLeft}>
+                                                    {canSelect && (
+                                                        <View
+                                                            style={[
+                                                                styles.selectionCheckbox,
+                                                                {
+                                                                    backgroundColor: isSelected 
+                                                                        ? '#1776BA' 
+                                                                        : 'transparent',
+                                                                    borderColor: isSelected 
+                                                                        ? '#1776BA' 
+                                                                        : borderColor,
+                                                                },
+                                                            ]}
+                                                        >
+                                                            {isSelected && (
+                                                                <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                                                            )}
+                                                        </View>
+                                                    )}
+                                                    <ThemedText style={[styles.itemTitle, { color: primaryTextColor }]}>
+                                                        Billet #{index + 1}
+                                                    </ThemedText>
+                                                </View>
+                                                {item.status && (
+                                                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status, isDark) + '20' }]}>
+                                                        <ThemedText style={[styles.statusText, { color: getStatusColor(item.status, isDark) }]}>
+                                                            {getStatusLabel(item.status)}
+                                                        </ThemedText>
+                                                    </View>
+                                                )}
+                                            </View>
+
+                                            {/* Informations du passager */}
+                                            <View style={styles.itemContent}>
+                                                <View style={styles.detailRow}>
+                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                                                        Passager
+                                                    </ThemedText>
+                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
+                                                        {item.firstName && item.lastName 
+                                                            ? `${item.firstName} ${item.lastName}`
+                                                            : '--'
+                                                        }
+                                                    </ThemedText>
+                                                </View>
+
+                                                <View style={styles.detailRow}>
+                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                                                        Numéro de siège
+                                                    </ThemedText>
+                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
+                                                        {item.seatNumber || '--'}
+                                                    </ThemedText>
+                                                </View>
+
+                                                <View style={styles.detailRow}>
+                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                                                        Type de passager
+                                                    </ThemedText>
+                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
+                                                        {getPassengerTypeLabel(item.passengerType)}
+                                                    </ThemedText>
+                                                </View>
+
+                                                <View style={styles.detailRow}>
+                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                                                        Type de trajet
+                                                    </ThemedText>
+                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
+                                                        {getLegLabel(item.leg)}
+                                                    </ThemedText>
+                                                </View>
+
+                                                {/* Checkbox pour la validation */}
+                                                <View style={styles.detailRow}>
+                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                                                        Peut être validé
+                                                    </ThemedText>
+                                                    <View style={styles.checkboxContainer}>
+                                                        <View
+                                                            style={[
+                                                                styles.checkbox,
+                                                                {
+                                                                    backgroundColor: item.canValidate ? '#1776BA' : (isDark ? '#3A3A3C' : '#E0E0E0'),
+                                                                    borderColor: item.canValidate ? '#1776BA' : borderColor,
+                                                                },
+                                                            ]}
+                                                        >
+                                                            {item.canValidate && (
+                                                                <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                                                            )}
+                                                        </View>
+                                                        <ThemedText style={[styles.checkboxLabel, { color: primaryTextColor }]}>
+                                                            {item.canValidate ? 'Oui' : 'Non'}
+                                                        </ThemedText>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            {/* Séparateur */}
+                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                        </>
+                    )}
 
                     {/* Section : Type de trajet */}
                     <View style={styles.section}>
@@ -381,6 +684,43 @@ export default function ScanResultScreen() {
                     </View>
                 </View>
             </ScrollView>
+
+            {/* Bouton de validation fixe en bas */}
+            {selectedItems.size > 0 && (
+                <View
+                    style={[
+                        styles.validationButtonContainer,
+                        {
+                            backgroundColor: cardBackgroundColor,
+                            borderTopColor: borderColor,
+                            paddingBottom: insets.bottom + 16,
+                        },
+                    ]}
+                >
+                    <TouchableOpacity
+                        style={[
+                            styles.validationButton,
+                            {
+                                backgroundColor: '#1776BA',
+                                opacity: isValidating ? 0.6 : 1,
+                            },
+                        ]}
+                        onPress={handleValidateItems}
+                        disabled={isValidating}
+                    >
+                        {isValidating ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                            <>
+                                <MaterialIcons name="check-circle" size={24} color="#FFFFFF" />
+                                <ThemedText style={styles.validationButtonText}>
+                                    Valider {selectedItems.size} billet{selectedItems.size > 1 ? 's' : ''}
+                                </ThemedText>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            )}
         </View>
     );
 }
@@ -495,6 +835,87 @@ const styles = StyleSheet.create({
     detailValue: {
         fontSize: 16,
         fontFamily: 'Ubuntu_Bold',
+    },
+    itemCard: {
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 12,
+    },
+    itemHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    itemTitle: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Bold',
+    },
+    itemContent: {
+        gap: 8,
+    },
+    checkboxContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    checkbox: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        borderWidth: 2,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    checkboxLabel: {
+        fontSize: 14,
+        fontFamily: 'Ubuntu_Medium',
+    },
+    itemHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        flex: 1,
+    },
+    selectionCheckbox: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        borderWidth: 2,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    validationButtonContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        paddingHorizontal: 20,
+        paddingTop: 16,
+        borderTopWidth: 1,
+        // shadowColor: '#000',
+        // shadowOffset: {
+        //     width: 0,
+        //     height: -2,
+        // },
+        // shadowOpacity: 0.1,
+        // shadowRadius: 4,
+        // elevation: 5,
+    },
+    validationButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        gap: 8,
+    },
+    validationButtonText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Bold',
+        color: '#FFFFFF',
     },
 });
 

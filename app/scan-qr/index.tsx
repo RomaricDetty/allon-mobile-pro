@@ -3,7 +3,8 @@ import { processScanApi, verifyQRCode } from '@/api/departures';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { router } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -20,10 +21,31 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SCAN_AREA_SIZE = 280;
+const SCAN_COOLDOWN = 2000;
+const API_TIMEOUT = 10000;
+
+interface QRValidationData {
+    c: string;
+    cid: string;
+    did: string;
+    t: string;
+}
+
+interface DetectedQR {
+    data: string;
+    inZone: boolean;
+    timestamp: number;
+}
+
+interface ScanAreaPosition {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
 
 /**
- * Écran de scan de QR Code avec zone dédiée STRICTE
- * Solution alternative : désactiver/réactiver le scanner selon la position
+ * Écran de scan de QR Code avec zone dédiée stricte et optimisations
  */
 const ScanQRScreen = () => {
     const insets = useSafeAreaInsets();
@@ -31,18 +53,21 @@ const ScanQRScreen = () => {
     const [scanned, setScanned] = useState(false);
     const [hasScannedOnce, setHasScannedOnce] = useState(false);
     const [torchEnabled, setTorchEnabled] = useState(false);
-    const [scanAreaPosition, setScanAreaPosition] = useState(null);
-    const [detectedQRs, setDetectedQRs] = useState([]);
-    const [hash, setHash] = useState(null);
-    const [objetToValidate, setObjetToValidate] = useState<Object>({});
+    const [scanAreaPosition, setScanAreaPosition] = useState<ScanAreaPosition | null>(null);
+    const [detectedQRs, setDetectedQRs] = useState<DetectedQR[]>([]);
     const [loadingScanProcess, setLoadingScanProcess] = useState(false);
     const [isScanningEnabled, setIsScanningEnabled] = useState(true);
-    const lastScannedData = useRef<string | null>(null); // Ajouter cette ligne
+
+    const params = useLocalSearchParams<{ departure: string }>();
 
     const scanAreaRef = useRef(null);
     const lastScanTime = useRef(0);
+    const lastScannedData = useRef<string | null>(null);
+    const soundRef = useRef<Audio.Sound | null>(null);
     const scanAnimation = useRef(new Animated.Value(0)).current;
-    const SCAN_COOLDOWN = 2000;
+    const measureAttempts = useRef(0);
+
+    console.log('params dans le scan-qr: ', JSON.stringify(params));
 
     /**
      * Animation de la ligne de scan
@@ -74,164 +99,341 @@ const ScanQRScreen = () => {
             playsInSilentModeIOS: true,
             staysActiveInBackground: false,
         });
+
+        return () => {
+            if (soundRef.current) {
+                soundRef.current.unloadAsync();
+            }
+        };
     }, []);
 
     /**
-     * Mesure la position de la zone de scan
+     * Mesure la position de la zone de scan avec plusieurs tentatives
      */
     useEffect(() => {
         const measureScanArea = () => {
-            if (scanAreaRef.current) {
-                scanAreaRef.current.measure((x, y, width, height, pageX, pageY) => {
-                    console.log('Zone de scan mesurée (measure):', { 
-                        x, y, width, height, pageX, pageY 
-                    });
-                    
-                    // Utiliser pageX/pageY car ce sont les coordonnées absolues
-                    setScanAreaPosition({ 
-                        x: pageX, 
-                        y: pageY, 
-                        width, 
-                        height 
-                    });
-                });
+            if (!scanAreaRef.current) {
+                console.log('[MEASURE] scanAreaRef non disponible');
+                return;
             }
+
+            scanAreaRef.current.measure((x, y, width, height, pageX, pageY) => {
+                // Vérifier si la mesure est valide
+                if (pageX === 0 && pageY === 0 && measureAttempts.current < 5) {
+                    console.log('[MEASURE] Mesure invalide, nouvelle tentative...', {
+                        attempt: measureAttempts.current + 1
+                    });
+                    measureAttempts.current++;
+                    setTimeout(measureScanArea, 200);
+                    return;
+                }
+
+                console.log('[MEASURE] Zone de scan mesurée:', {
+                    pageX: pageX.toFixed(0),
+                    pageY: pageY.toFixed(0),
+                    width,
+                    height
+                });
+
+                setScanAreaPosition({
+                    x: pageX,
+                    y: pageY,
+                    width,
+                    height
+                });
+            });
         };
 
-        const timer = setTimeout(measureScanArea, 500);
-        return () => clearTimeout(timer);
+        const timer1 = setTimeout(measureScanArea, 300);
+        const timer2 = setTimeout(measureScanArea, 800);
+
+        return () => {
+            clearTimeout(timer1);
+            clearTimeout(timer2);
+        };
     }, []);
 
     /**
-     * Joue un son de confirmation
+     * Joue un son de confirmation avec gestion des ressources
      */
     const playBeepSound = async () => {
         try {
+            // Nettoyer le son précédent
+            if (soundRef.current) {
+                await soundRef.current.unloadAsync();
+            }
+
             const { sound } = await Audio.Sound.createAsync(
                 require('@/assets/mp3/beep-scan.mp3'),
                 { shouldPlay: true, volume: 1 }
             );
-            
+
+            soundRef.current = sound;
+
             sound.setOnPlaybackStatusUpdate((status) => {
                 if (status.isLoaded && status.didJustFinish) {
                     sound.unloadAsync();
+                    soundRef.current = null;
                 }
             });
         } catch (error) {
-            console.log('Impossible de jouer le son:', error);
+            console.log('[AUDIO] Impossible de jouer le son:', error);
         }
     };
 
     /**
-     * NOUVELLE APPROCHE : Vérifier si le QR code est dans la zone
-     * Cette fonction est appelée à chaque détection
+     * Feedback haptique
      */
-    const isQRCodeInScanArea = (bounds, cornerPoints) => {
+    const triggerHapticFeedback = async (type: 'success' | 'error' | 'warning' = 'success') => {
+        try {
+            switch (type) {
+                case 'success':
+                    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    break;
+                case 'error':
+                    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                    break;
+                case 'warning':
+                    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    break;
+            }
+        } catch (error) {
+            console.log('[HAPTIC] Erreur feedback haptique:', error);
+        }
+    };
+
+    /**
+     * Vérifie si le QR code est dans la zone de scan
+     */
+    const isQRCodeInScanArea = (bounds, cornerPoints): boolean => {
         if (!scanAreaPosition) {
-            console.log('Zone de scan non initialisée');
+            console.log('[ZONE] Zone de scan non initialisée');
             return false;
         }
 
-        // Essayer d'abord avec cornerPoints (plus fiable)
-        if (cornerPoints && cornerPoints.length === 4) {
-            console.log('Utilisation de cornerPoints:', cornerPoints);
-            
-            // Calculer le centre à partir des corner points
-            const centerX = cornerPoints.reduce((sum, p) => sum + p.x, 0) / 4;
-            const centerY = cornerPoints.reduce((sum, p) => sum + p.y, 0) / 4;
+        let centerX: number, centerY: number;
 
-            console.log('Centre QR (cornerPoints):', { x: centerX, y: centerY });
-            console.log('Zone de scan:', scanAreaPosition);
-
-            const isInZone = 
-                centerX >= scanAreaPosition.x &&
-                centerX <= scanAreaPosition.x + scanAreaPosition.width &&
-                centerY >= scanAreaPosition.y &&
-                centerY <= scanAreaPosition.y + scanAreaPosition.height;
-
-            console.log(isInZone ? 'Dans la zone !' : 'Hors zone !');
-            return isInZone;
+        // Priorité aux cornerPoints (plus fiables)
+        if (cornerPoints?.length === 4) {
+            centerX = cornerPoints.reduce((sum, p) => sum + p.x, 0) / 4;
+            centerY = cornerPoints.reduce((sum, p) => sum + p.y, 0) / 4;
+            console.log('[ZONE] Utilisation cornerPoints');
         }
+        // Fallback sur bounds
+        else if (bounds) {
+            const isNormalized = bounds.origin.x <= 1 && bounds.origin.y <= 1;
 
-        // Fallback : utiliser bounds si cornerPoints n'est pas disponible
-        if (!bounds) {
-            console.log('Pas de bounds ni cornerPoints - REFUSÉ');
+            const qrX = isNormalized ? bounds.origin.x * SCREEN_WIDTH : bounds.origin.x;
+            const qrY = isNormalized ? bounds.origin.y * SCREEN_HEIGHT : bounds.origin.y;
+            const qrWidth = isNormalized ? bounds.size.width * SCREEN_WIDTH : bounds.size.width;
+            const qrHeight = isNormalized ? bounds.size.height * SCREEN_HEIGHT : bounds.size.height;
+
+            centerX = qrX + qrWidth / 2;
+            centerY = qrY + qrHeight / 2;
+            console.log('[ZONE] Utilisation bounds');
+        }
+        else {
+            console.log('[ZONE] Aucune donnée de position disponible');
             return false;
         }
 
-        console.log('Utilisation de bounds:', bounds);
+        const { x, y, width, height } = scanAreaPosition;
+        const isInZone =
+            centerX >= x && centerX <= x + width &&
+            centerY >= y && centerY <= y + height;
 
-        // Vérifier si coordonnées normalisées ou pixels
-        const isNormalized = bounds.origin.x <= 1 && 
-                            bounds.origin.y <= 1 && 
-                            bounds.size.width <= 1 && 
-                            bounds.size.height <= 1;
+        console.log(isInZone ? '[ZONE] QR dans la zone' : '[ZONE] QR hors zone', {
+            center: { x: centerX.toFixed(0), y: centerY.toFixed(0) },
+            zone: { x: x.toFixed(0), y: y.toFixed(0), width, height }
+        });
 
-        let qrX, qrY, qrWidth, qrHeight;
-
-        if (isNormalized) {
-            qrX = bounds.origin.x * SCREEN_WIDTH;
-            qrY = bounds.origin.y * SCREEN_HEIGHT;
-            qrWidth = bounds.size.width * SCREEN_WIDTH;
-            qrHeight = bounds.size.height * SCREEN_HEIGHT;
-        } else {
-            qrX = bounds.origin.x;
-            qrY = bounds.origin.y;
-            qrWidth = bounds.size.width;
-            qrHeight = bounds.size.height;
-        }
-
-        const centerX = qrX + qrWidth / 2;
-        const centerY = qrY + qrHeight / 2;
-
-        console.log('Centre QR (bounds):', { x: centerX, y: centerY });
-        console.log('Zone de scan:', scanAreaPosition);
-
-        const isInZone = 
-            centerX >= scanAreaPosition.x &&
-            centerX <= scanAreaPosition.x + scanAreaPosition.width &&
-            centerY >= scanAreaPosition.y &&
-            centerY <= scanAreaPosition.y + scanAreaPosition.height;
-
-        console.log(isInZone ? 'Dans la zone !' : 'Hors zone !');
         return isInZone;
+    };
+
+    /**
+     * Wrapper avec timeout pour les appels API
+     */
+    const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number = API_TIMEOUT): Promise<T> => {
+        return Promise.race([
+            promise,
+            new Promise<T>((_, reject) =>
+                setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
+            )
+        ]);
+    };
+
+    /**
+     * Vérifie si le QR code est valide via l'API
+     */
+    const verifyQRCodeApi = async (data: string): Promise<QRValidationData | null> => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+
+            if (!token) {
+                console.error('[API] Token non disponible');
+                Alert.alert('Erreur', 'Session expirée. Veuillez vous reconnecter.');
+                return null;
+            }
+
+            console.log('[API] Vérification du QR code...');
+            const response = await withTimeout(verifyQRCode(data, token));
+
+            // Validation stricte du format
+            if (response?.data &&
+                typeof response.data.c === 'string' &&
+                typeof response.data.cid === 'string' &&
+                typeof response.data.did === 'string' &&
+                typeof response.data.t === 'string') {
+                console.log('[API] QR code valide:', {
+                    c: response.data.c,
+                    cid: response.data.cid,
+                    did: response.data.did,
+                    t: response.data.t
+                });
+                return response.data as QRValidationData;
+            }
+
+            console.log('[API] Format de réponse invalide');
+            return null;
+        } catch (error: any) {
+            console.error('[API] Erreur vérification QR:', error.message || error);
+
+            // Gestion spécifique des erreurs
+            if (error.message?.includes('timeout')) {
+                Alert.alert(
+                    'Délai dépassé',
+                    'La vérification du QR code a pris trop de temps. Vérifiez votre connexion.'
+                );
+            } else if (error.message?.includes('Network')) {
+                Alert.alert(
+                    'Erreur réseau',
+                    'Impossible de se connecter au serveur. Vérifiez votre connexion internet.'
+                );
+            }
+
+            return null;
+        }
+    };
+
+    /**
+     * Traite le scan du QR code avec retry
+     */
+    const processScan = async (validationData: QRValidationData, retryCount = 0) => {
+        const MAX_RETRIES = 2;
+
+        try {
+            const token = await AsyncStorage.getItem('token');
+
+            if (!token) {
+                throw new Error('Token non disponible');
+            }
+
+            console.log('[PROCESS] Traitement du scan...', { retry: retryCount });
+            const response = await withTimeout(processScanApi(validationData, token));
+
+            if (response?.data) {
+                console.log('[PROCESS] Scan traité avec succès');
+                
+                // Vérification que le ticket correspond au départ
+                let departure: any = null;
+                try {
+                    if (params.departure) {
+                        departure = JSON.parse(params.departure);
+                    }
+                } catch (error) {
+                    console.error('[PROCESS] Erreur lors du parsing du départ:', error);
+                }
+
+                // Récupération de l'ID du départ depuis la réponse
+                const bookingDepartureId = response.data?.booking?.departure?.id;
+                const departureId = departure?.id;
+
+                // Vérification de correspondance des IDs
+                // if (departureId && bookingDepartureId && departureId !== bookingDepartureId) {
+                //     console.log('[PROCESS] Les IDs ne correspondent pas:', {
+                //         expected: departureId,
+                //         received: bookingDepartureId
+                //     });
+                    
+                //     await triggerHapticFeedback('error');
+                //     setLoadingScanProcess(false);
+                    
+                //     Alert.alert(
+                //         'Ticket invalide',
+                //         'Ce ticket ne correspond pas au départ sélectionné. Veuillez scanner un ticket valide pour ce trajet.',
+                //         [{ text: 'OK', onPress: resetScan }]
+                //     );
+                //     return;
+                // }
+
+                // Si tout est OK, on continue avec la redirection
+                await triggerHapticFeedback('success');
+
+                console.log('response.data dans le processScan: ', JSON.stringify(response.data));
+
+                router.push({
+                    pathname: '/scan-result',
+                    params: {
+                        bookingData: JSON.stringify(response.data),
+                    },
+                });
+            } else {
+                throw new Error('Réponse invalide du serveur');
+            }
+        } catch (error: any) {
+            console.error('[PROCESS] Erreur traitement scan:', error.message || error);
+
+            // Retry automatique pour les erreurs réseau
+            if (retryCount < MAX_RETRIES &&
+                (error.message?.includes('Network') || error.message?.includes('timeout'))) {
+                console.log('[PROCESS] Nouvelle tentative...', { attempt: retryCount + 1 });
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return processScan(validationData, retryCount + 1);
+            }
+
+            // Erreur finale
+            await triggerHapticFeedback('error');
+
+            Alert.alert(
+                'Erreur',
+                retryCount >= MAX_RETRIES
+                    ? 'Impossible de traiter le scan après plusieurs tentatives. Vérifiez votre connexion.'
+                    : 'Une erreur est survenue lors du traitement du scan.',
+                [{ text: 'OK', onPress: resetScan }]
+            );
+        } finally {
+            setLoadingScanProcess(false);
+        }
     };
 
     /**
      * Gère la détection du QR code
      */
     const handleBarCodeScanned = async ({ type, data, bounds, cornerPoints }) => {
-        console.log('\n=== NOUVEAU SCAN DÉTECTÉ ===');
-        console.log('Type:', type);
-        console.log('Data:', data.substring(0, 50));
-        console.log('Bounds:', bounds);
-        console.log('CornerPoints:', cornerPoints);
-        
-        // Désactiver immédiatement le scan pour éviter les boucles
+        console.log('\n[SCAN] === NOUVEAU SCAN DÉTECTÉ ===');
+        console.log('[SCAN] Type:', type);
+        console.log('[SCAN] Data:', data.substring(0, 50));
+
+        // Guards - dans l'ordre de priorité
         if (scanned || !isScanningEnabled) {
-            console.log('Scan désactivé - ignoré');
+            console.log('[SCAN] Scan désactivé - ignoré');
             return;
         }
 
-        // Vérifier si c'est le même QR code que le dernier scanné
         if (lastScannedData.current === data) {
-            console.log('Même QR code que le dernier scan - ignoré');
+            console.log('[SCAN] QR code déjà scanné - ignoré');
             return;
         }
 
-        // Cooldown
         const now = Date.now();
         if (now - lastScanTime.current < SCAN_COOLDOWN) {
-            console.log('Cooldown actif - scan ignoré');
+            console.log('[SCAN] Cooldown actif - scan ignoré');
             return;
         }
 
-        // VÉRIFICATION STRICTE DE LA ZONE
-        const isInZone = isQRCodeInScanArea(bounds, cornerPoints);
-        
-        if (!isInZone) {
-            console.log('QR CODE HORS ZONE - IGNORÉ\n');
-            // Enregistrer pour affichage debug
+        // Vérification zone AVANT toute autre action
+        if (!isQRCodeInScanArea(bounds, cornerPoints)) {
+            console.log('[SCAN] QR hors zone - ignoré\n');
             setDetectedQRs(prev => [...prev.slice(-4), {
                 data: data.substring(0, 20),
                 inZone: false,
@@ -240,40 +442,38 @@ const ScanQRScreen = () => {
             return;
         }
 
-        console.log('QR CODE VALIDE - ACCEPTÉ\n');
-        
-        // Désactiver immédiatement le scan
+        // Désactivation immédiate pour éviter les scans multiples
+        console.log('[SCAN] QR valide - traitement...\n');
         setIsScanningEnabled(false);
-        lastScanTime.current = now;
-        lastScannedData.current = data; // Enregistrer le QR code scanné
-        
         setScanned(true);
         setHasScannedOnce(true);
-        await playBeepSound();
+        lastScanTime.current = now;
+        lastScannedData.current = data;
 
-        // TODO: Verifier si le QR code est valide
-        const isValid = await verifyQRCodeApi(data);
-        if (!isValid) {
-            console.log('QR CODE NON VALIDE - IGNORÉ\n');
+        // Feedback utilisateur immédiat
+        await Promise.all([
+            playBeepSound(),
+            triggerHapticFeedback('success')
+        ]);
+
+        // Vérification API
+        const validationData = await verifyQRCodeApi(data);
+
+        if (!validationData) {
+            console.log('[SCAN] QR code invalide ou erreur API');
             setScanned(false);
-            // NE PAS réactiver le scan ici - il restera désactivé jusqu'au clic sur "Réessayer"
-            lastScanTime.current = 0;
-            lastScannedData.current = null; // Réinitialiser pour permettre un nouveau scan
-            
+            await triggerHapticFeedback('error');
+
             Alert.alert(
                 'QR Code invalide',
-                'Le QR code scanné n\'est pas un QR Code valide.',
-                [
-                    {
-                        text: 'Réessayer',
-                        onPress: () => {
-                            // Réactiver le scan uniquement quand l'utilisateur clique sur "Réessayer"
-                            setIsScanningEnabled(true);
-                            lastScanTime.current = 0;
-                            lastScannedData.current = null;
-                        }
+                'Le QR code scanné n\'est pas valide pour cette application.',
+                [{
+                    text: 'Réessayer',
+                    onPress: () => {
+                        setIsScanningEnabled(true);
+                        lastScannedData.current = null;
                     }
-                ]
+                }]
             );
             return;
         }
@@ -285,74 +485,9 @@ const ScanQRScreen = () => {
             timestamp: now
         }]);
 
-        setHash(data);
+        // Traitement final
         setLoadingScanProcess(true);
-        await processScan();
-    };
-
-    /**
-     * Vérifie si le QR code est valide en appelant l'API
-     * @param data - Le QR code scanné
-     * @returns true si le QR code est valide (format correct), false sinon
-     */
-    const verifyQRCodeApi = async (data: string) => {
-        try {
-            const token = await AsyncStorage.getItem('token');
-            const response = await verifyQRCode(data, token);
-            console.log('Réponse de la vérification du QR code:', response.data);
-            
-            // Vérifier que la réponse a le format attendu
-            if (response.data && 
-                typeof response.data.c === 'string' && 
-                typeof response.data.cid === 'string' && 
-                typeof response.data.did === 'string' && 
-                typeof response.data.t === 'string') {
-                    console.log('response.data dans le verifyQRCodeApi: ', response.data);
-                    setObjetToValidate({... response.data});
-                return true;
-            }
-            
-            return false;
-        } catch (error) {
-            console.log('Erreur lors de la vérification du QR code:', error);
-            return false;
-        }
-    };
-
-    /**
-     * Traite le scan du QR code
-     */
-    const processScan = async () => {
-        try {
-            const token = await AsyncStorage.getItem('token');
-            const response = await processScanApi(objetToValidate, token);
-            
-            // Naviguer vers l'écran de résultat avec les données de la réservation
-            if (response.data) {
-                router.push({
-                    pathname: '/scan-result',
-                    params: {
-                        bookingData: JSON.stringify(response.data),
-                    },
-                });
-            }
-        } catch (error) {
-            console.log('Erreur lors du traitement du scan:', error);
-            Alert.alert(
-                'Erreur',
-                'Une erreur est survenue lors du traitement du scan. Veuillez réessayer.',
-                [
-                    {
-                        text: 'OK',
-                        onPress: () => {
-                            resetScan();
-                        }
-                    }
-                ]
-            );
-        } finally {
-            setLoadingScanProcess(false);
-        }
+        await processScan(validationData);
     };
 
     /**
@@ -360,15 +495,21 @@ const ScanQRScreen = () => {
      */
     const toggleTorch = () => {
         setTorchEnabled(!torchEnabled);
+        triggerHapticFeedback('warning');
     };
 
+    /**
+     * Réinitialise l'état du scan
+     */
     const resetScan = () => {
+        console.log('[SCAN] Réinitialisation du scan');
         setScanned(false);
         setIsScanningEnabled(true);
         lastScanTime.current = 0;
-        lastScannedData.current = null; // Réinitialiser le dernier QR code scanné
+        lastScannedData.current = null;
     };
 
+    // Affichage du loader initial
     if (!permission) {
         return (
             <View style={styles.loadingContainer}>
@@ -377,6 +518,7 @@ const ScanQRScreen = () => {
         );
     }
 
+    // Écran de demande de permission
     if (!permission.granted) {
         return (
             <View style={styles.container}>
@@ -411,7 +553,7 @@ const ScanQRScreen = () => {
                 }}
             >
                 <View style={styles.overlay}>
-                    {/* Boutons */}
+                    {/* Bouton fermer */}
                     <Pressable
                         style={[styles.closeButton, { top: insets.top + 16 }]}
                         onPress={() => router.back()}
@@ -419,6 +561,7 @@ const ScanQRScreen = () => {
                         <MaterialCommunityIcons name="close" size={28} color="#FFF" />
                     </Pressable>
 
+                    {/* Bouton torche */}
                     <Pressable
                         style={[styles.torchButton, { top: insets.top + 16 }]}
                         onPress={toggleTorch}
@@ -430,49 +573,51 @@ const ScanQRScreen = () => {
                         />
                     </Pressable>
 
-                    {/* Zone supérieure */}
+                    {/* Zone supérieure sombre */}
                     <View style={styles.overlayTop} />
 
                     {/* Zone de scan centrale */}
                     <View style={styles.scanRow}>
                         <View style={styles.overlaySide} />
 
-                        <View 
+                        <View
                             ref={scanAreaRef}
                             style={styles.scanArea}
                             collapsable={false}
                         >
                             {/* Animation de scan */}
                             {!scanned && isScanningEnabled && (
-                                <Animated.View 
+                                <Animated.View
                                     style={[
                                         styles.scanLine,
-                                        { 
+                                        {
                                             transform: [{ translateY: scanLineTranslateY }]
                                         }
                                     ]}
                                 />
                             )}
 
-                            {/* Coins */}
+                            {/* Coins de la zone de scan */}
                             <View style={[styles.corner, styles.topLeft]} />
                             <View style={[styles.corner, styles.topRight]} />
                             <View style={[styles.corner, styles.bottomLeft]} />
                             <View style={[styles.corner, styles.bottomRight]} />
 
                             {/* Grille de guidage */}
-                            {!scanned && (
+                            {!scanned && isScanningEnabled && (
                                 <View style={styles.gridContainer}>
-                                    <View style={styles.gridLineVertical} />
-                                    <View style={styles.gridLineVertical} />
-                                    <View style={styles.gridLineHorizontal} />
-                                    <View style={styles.gridLineHorizontal} />
+                                    <View style={[styles.gridLineVertical, { left: '33.33%' }]} />
+                                    <View style={[styles.gridLineVertical, { left: '66.66%' }]} />
+                                    <View style={[styles.gridLineHorizontal, { top: '33.33%' }]} />
+                                    <View style={[styles.gridLineHorizontal, { top: '66.66%' }]} />
                                 </View>
                             )}
 
+                            {/* Indicateur de chargement */}
                             {loadingScanProcess && (
                                 <View style={styles.loadingScanProcess}>
-                                    <ActivityIndicator size="large" color="#FFF" />
+                                    <ActivityIndicator size={50} color="#FFF" />
+                                    <Text style={styles.loadingText}>Traitement...</Text>
                                 </View>
                             )}
                         </View>
@@ -487,24 +632,25 @@ const ScanQRScreen = () => {
                                 {scanned ? 'QR Code scanné !' : 'Placez le QR dans la zone de scan'}
                             </Text>
                             <Text style={styles.instructionText}>
-                                {scanned 
+                                {scanned
                                     ? 'Scan effectué avec succès'
-                                    : 'Le QR code doit être dans la zone de scan'
+                                    : 'Le QR code doit être centré dans la zone blanche'
                                 }
                             </Text>
 
-                            {hasScannedOnce && (
-                                <Pressable 
+                            {/* Bouton de rescan */}
+                            {hasScannedOnce && !loadingScanProcess && (
+                                <Pressable
                                     style={[
                                         styles.rescanButton,
                                         scanned && styles.rescanButtonActive
-                                    ]} 
+                                    ]}
                                     onPress={resetScan}
                                 >
-                                    <MaterialCommunityIcons 
-                                        name="refresh" 
-                                        size={20} 
-                                        color={scanned ? "#FFF" : "#000"} 
+                                    <MaterialCommunityIcons
+                                        name="refresh"
+                                        size={20}
+                                        color={scanned ? "#FFF" : "#000"}
                                     />
                                     <Text style={[
                                         styles.rescanButtonText,
@@ -600,14 +746,12 @@ const styles = StyleSheet.create({
         width: 1,
         height: '100%',
         backgroundColor: 'rgba(255,255,255,0.2)',
-        left: '33.33%',
     },
     gridLineHorizontal: {
         position: 'absolute',
         width: '100%',
         height: 1,
         backgroundColor: 'rgba(255,255,255,0.2)',
-        top: '33.33%',
     },
     corner: {
         position: 'absolute',
@@ -640,15 +784,6 @@ const styles = StyleSheet.create({
         borderLeftWidth: 0,
         borderTopWidth: 0,
     },
-    successIndicator: {
-        position: 'absolute',
-        backgroundColor: 'rgba(255,255,255,0.95)',
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
     overlayBottom: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.7)',
@@ -671,25 +806,6 @@ const styles = StyleSheet.create({
         color: 'rgba(255,255,255,0.8)',
         textAlign: 'center',
         marginBottom: 20,
-    },
-    debugContainer: {
-        backgroundColor: 'rgba(0,0,0,0.8)',
-        padding: 12,
-        borderRadius: 8,
-        marginBottom: 16,
-        width: '100%',
-    },
-    debugText: {
-        fontSize: 10,
-        fontFamily: 'Courier',
-        color: '#FFF',
-        marginBottom: 2,
-    },
-    debugSuccess: {
-        color: '#4CAF50',
-    },
-    debugError: {
-        color: '#F44336',
     },
     rescanButton: {
         flexDirection: 'row',
@@ -717,6 +833,14 @@ const styles = StyleSheet.create({
         height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
+        zIndex: 1000,
+        backgroundColor: 'rgba(0,0,0,0.85)',
+    },
+    loadingText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Medium',
+        color: '#FFF',
+        marginTop: 16,
     },
     permissionContainer: {
         flex: 1,

@@ -1,10 +1,13 @@
+import { baseUrl } from '@/api/config';
 import { Departure } from '@/components/departure-card';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { router, useLocalSearchParams } from 'expo-router';
-import React from 'react';
-import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -79,6 +82,10 @@ export default function DepartureDetailsScreen() {
     const companyColor = getCompanyColor(departure.company);
     const companyInitials = getCompanyInitials(departure.company);
 
+    const [showSearchModal, setShowSearchModal] = useState(false);
+    const [ticketReference, setTicketReference] = useState('');
+    const [isSearching, setIsSearching] = useState(false);
+
     /**
      * Gère le retour à l'écran précédent
      */
@@ -89,31 +96,80 @@ export default function DepartureDetailsScreen() {
     /**
      * Gère l'action du bouton de démarrage du trajet
      * Affiche une alerte de confirmation pour le partage de position géographique
+     * L'alerte ne s'affiche qu'une seule fois par trajet
     */
-    const handleStartTraject = () => {
-        Alert.alert(
-            'Démarrer le trajet',
-            'Vous êtes sur le point de démarrer le trajet. En confirmant, vous acceptez de partager votre position géographique en temps réel pour permettre aux usagers de voir votre position sur la carte.',
-            [
-                {
-                    text: 'Annuler',
-                    style: 'cancel',
-                },
-                {
-                    text: 'Confirmer',
-                    onPress: () => {
-                        // Redirige vers l'écran de suivi de trajet avec les données du départ
-                        router.push({
-                            pathname: '/track-route',
-                            params: {
-                                departure: JSON.stringify(departure),
-                            },
-                        });
+    const handleStartTraject = async () => {
+        // Crée une clé unique pour ce trajet basée sur l'ID du départ
+        const trajectoryAlertKey = `trajectory_alert_${departure.id}`;
+
+        try {
+            // Vérifie si l'alerte a déjà été affichée pour ce trajet
+            const alertAlreadyShown = await AsyncStorage.getItem(trajectoryAlertKey);
+
+            if (alertAlreadyShown === 'true') {
+                // Si l'alerte a déjà été affichée, rediriger directement
+                router.push({
+                    pathname: '/track-route',
+                    params: {
+                        departure: JSON.stringify(departure),
                     },
-                },
-            ],
-            { cancelable: true }
-        );
+                });
+                return;
+            }
+
+            // Si l'alerte n'a pas encore été affichée, l'afficher
+            Alert.alert(
+                'Démarrer le trajet',
+                'Vous êtes sur le point de démarrer le trajet. En confirmant, vous acceptez de partager votre position géographique en temps réel pour permettre aux usagers de voir votre position sur la carte.',
+                [
+                    {
+                        text: 'Annuler',
+                        style: 'cancel',
+                    },
+                    {
+                        text: 'Confirmer',
+                        onPress: async () => {
+                            // Stocke l'information que l'alerte a été affichée pour ce trajet
+                            await AsyncStorage.setItem(trajectoryAlertKey, 'true');
+                            
+                            // Redirige vers l'écran de suivi de trajet avec les données du départ
+                            router.push({
+                                pathname: '/track-route',
+                                params: {
+                                    departure: JSON.stringify(departure),
+                                },
+                            });
+                        },
+                    },
+                ],
+                { cancelable: true }
+            );
+        } catch (error) {
+            console.error('Erreur lors de la vérification de l\'alerte:', error);
+            // En cas d'erreur, afficher l'alerte par défaut
+            Alert.alert(
+                'Démarrer le trajet',
+                'Vous êtes sur le point de démarrer le trajet. En confirmant, vous acceptez de partager votre position géographique en temps réel pour permettre aux usagers de voir votre position sur la carte.',
+                [
+                    {
+                        text: 'Annuler',
+                        style: 'cancel',
+                    },
+                    {
+                        text: 'Confirmer',
+                        onPress: () => {
+                            router.push({
+                                pathname: '/track-route',
+                                params: {
+                                    departure: JSON.stringify(departure),
+                                },
+                            });
+                        },
+                    },
+                ],
+                { cancelable: true }
+            );
+        }
     };
 
     /**
@@ -125,10 +181,101 @@ export default function DepartureDetailsScreen() {
     };
 
     /**
-     * Gère la redirection vers l'écran de scan QR
-    */
+     * Gère l'action du bouton de scan QR - affiche un menu avec deux options
+     */
     const handleScanQR = () => {
-        router.push('/scan-qr');
+        Alert.alert(
+            'Validation de réservation',
+            'Choisissez une méthode de validation pour ce trajet.',
+            [
+                {
+                    text: 'Scanner un QR Code',
+                    onPress: () => {
+                        router.push({
+                            pathname: '/scan-qr',
+                            params: {
+                                departure: JSON.stringify(departure),
+                            },
+                        });
+                    },
+                },
+                {
+                    text: 'Rechercher par référence',
+                    onPress: () => {
+                        setShowSearchModal(true);
+                    },
+                },
+                {
+                    text: 'Annuler',
+                    style: 'cancel',
+                },
+            ],
+            { cancelable: true }
+        );
+    };
+
+    /**
+     * Recherche un ticket par référence manuellement
+     */
+    const handleSearchByReference = async () => {
+        if (!ticketReference.trim()) {
+            Alert.alert('Erreur', 'Veuillez saisir une référence de ticket.');
+            return;
+        }
+
+        setIsSearching(true);
+        try {
+            const token = await AsyncStorage.getItem('token');
+            if (!token) {
+                Alert.alert('Erreur', 'Session expirée. Veuillez vous reconnecter.');
+                return;
+            }
+
+            // Appel API pour rechercher la réservation par code
+            const response = await axios.get(`${baseUrl}/bookings/${ticketReference.trim()}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (response?.data) {
+                // Formatage des données pour correspondre au format attendu par scan-result
+                const bookingData = {
+                    booking: response.data,
+                };
+
+                // Fermer le modal et rediriger vers l'écran de résultat
+                setShowSearchModal(false);
+                setTicketReference('');
+
+                router.push({
+                    pathname: '/scan-result',
+                    params: {
+                        bookingData: JSON.stringify(bookingData),
+                    },
+                });
+            } else {
+                Alert.alert('Erreur', 'Aucune réservation trouvée avec cette référence.');
+            }
+        } catch (error: any) {
+            console.error('Erreur lors de la recherche par référence:', error);
+            Alert.alert(
+                'Erreur',
+                error.response?.data?.message || 'Impossible de trouver la réservation. Vérifiez la référence saisie.'
+            );
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    /**
+     * Ferme le modal de recherche
+     */
+    const handleCloseSearchModal = () => {
+        if (!isSearching) {
+            setShowSearchModal(false);
+            setTicketReference('');
+        }
     };
 
     /**
@@ -396,7 +543,7 @@ export default function DepartureDetailsScreen() {
                                     Statut
                                 </ThemedText>
                                 <ThemedText style={[styles.detailValue, { color: getStatusColor(departure.status) }]}>
-                                    { getStatusLabel(departure.status) || 'N/A'}
+                                    {getStatusLabel(departure.status) || 'N/A'}
                                 </ThemedText>
                             </View>
                         </View>
@@ -460,6 +607,21 @@ export default function DepartureDetailsScreen() {
                                 </View>
                             </>
                         )}
+
+                        {/* Voir la liste des réservations */}
+                        <>
+                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                            <View style={styles.detailRow}>
+                                <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                                    La liste des réservations
+                                </ThemedText>
+                                <Pressable style={{ backgroundColor: buttonBackgroundColor, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 }} onPress={() => console.log('Voir la liste des réservations')}>
+                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor, fontSize: 13 }]}>
+                                        Voir la liste
+                                    </ThemedText>
+                                </Pressable>
+                            </View>
+                        </>
                     </View>
                 </View>
             </ScrollView>
@@ -472,19 +634,129 @@ export default function DepartureDetailsScreen() {
                             style={[styles.scanButton, { backgroundColor: isDark ? '#2A2A2A' : '#FFFFFF', borderColor: borderColor }]}
                             onPress={handleScanQR}
                         >
-                            <MaterialIcons name="qr-code-scanner" size={24} color={primaryTextColor} />
-                            <ThemedText style={[styles.scanButtonText, { color: primaryTextColor }]}>Scanner</ThemedText>
+                            <MaterialIcons name="check-circle" size={24} color={primaryTextColor} />
+                            <ThemedText style={[styles.scanButtonText, { color: primaryTextColor }]}>Validation</ThemedText>
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.downloadButton, { backgroundColor: "#1776BA" }]}
                             onPress={handleStartTraject}
                         >
                             <MaterialIcons name="directions-bus-filled" size={24} color="#FFFFFF" />
-                            <ThemedText style={styles.downloadButtonText}>Démarrer</ThemedText>
+                            <ThemedText style={[styles.downloadButtonText, {  }]}>Démarrer</ThemedText>
                         </TouchableOpacity>
                     </View>
                 </View>
             )}
+
+            {/* Modal de recherche par référence */}
+            <Modal
+                visible={showSearchModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={handleCloseSearchModal}
+            >
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                >
+                    <Pressable
+                        style={styles.modalOverlay}
+                        onPress={handleCloseSearchModal}
+                        activeOpacity={1}
+                    >
+                        <Pressable
+                            style={styles.modalContentWrapper}
+                            onPress={(e) => e.stopPropagation()}
+                        >
+                            <View style={[styles.modalContent, { backgroundColor: cardBackgroundColor }]}>
+                                {/* En-tête du modal */}
+                                <View style={styles.modalHeader}>
+                                    <ThemedText style={[styles.modalTitle, { color: primaryTextColor }]}>
+                                        Rechercher par référence
+                                    </ThemedText>
+                                    <TouchableOpacity
+                                        onPress={handleCloseSearchModal}
+                                        disabled={isSearching}
+                                        style={styles.modalCloseButton}
+                                    >
+                                        <MaterialIcons name="close" size={24} color={primaryTextColor} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Contenu du modal avec ScrollView */}
+                                <ScrollView
+                                    style={styles.modalScrollView}
+                                    contentContainerStyle={styles.modalScrollContent}
+                                    keyboardShouldPersistTaps="handled"
+                                    showsVerticalScrollIndicator={false}
+                                >
+                                    <View style={styles.modalBody}>
+                                        <ThemedText style={[styles.modalLabel, { color: labelTextColor }]}>
+                                            Référence du ticket
+                                        </ThemedText>
+                                        <TextInput
+                                            style={[
+                                                styles.modalInput,
+                                                {
+                                                    backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5',
+                                                    borderColor: borderColor,
+                                                    color: primaryTextColor,
+                                                },
+                                            ]}
+                                            placeholder="Entrez la référence du ticket"
+                                            placeholderTextColor={secondaryTextColor}
+                                            value={ticketReference}
+                                            onChangeText={setTicketReference}
+                                            autoCapitalize="characters"
+                                            autoCorrect={false}
+                                            editable={!isSearching}
+                                            returnKeyType="search"
+                                            onSubmitEditing={handleSearchByReference}
+                                        />
+                                        <ThemedText style={[styles.modalHint, { color: secondaryTextColor }]}>
+                                            Saisissez le code de référence du ticket (ex: ABC123)
+                                        </ThemedText>
+                                    </View>
+                                </ScrollView>
+
+                                {/* Boutons du modal */}
+                                <View style={styles.modalFooter}>
+                                    <TouchableOpacity
+                                        style={[styles.modalCancelButton, { borderColor: borderColor }]}
+                                        onPress={handleCloseSearchModal}
+                                        disabled={isSearching}
+                                    >
+                                        <ThemedText style={[styles.modalCancelButtonText, { color: primaryTextColor }]}>
+                                            Annuler
+                                        </ThemedText>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.modalSearchButton,
+                                            {
+                                                backgroundColor: buttonBackgroundColor,
+                                                opacity: isSearching ? 0.6 : 1,
+                                            },
+                                        ]}
+                                        onPress={handleSearchByReference}
+                                        disabled={isSearching || !ticketReference.trim()}
+                                    >
+                                        {isSearching ? (
+                                            <ActivityIndicator color="#FFFFFF" />
+                                        ) : (
+                                            <>
+                                                <MaterialIcons name="search" size={20} color="#FFFFFF" />
+                                                <ThemedText style={styles.modalSearchButtonText}>Rechercher</ThemedText>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Pressable>
+                    </Pressable>
+                </KeyboardAvoidingView>
+            </Modal>
         </View>
     );
 }
@@ -936,5 +1208,99 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         fontFamily: 'Ubuntu_Bold',
+    },
+
+    // Styles pour le modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContentWrapper: {
+        width: '100%',
+        maxHeight: '90%',
+    },
+    modalContent: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingTop: 20,
+        paddingBottom: 20,
+        paddingHorizontal: 20,
+        maxHeight: '90%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontFamily: 'Ubuntu_Bold',
+        flex: 1,
+    },
+    modalCloseButton: {
+        width: 32,
+        height: 32,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalScrollView: {
+        flexGrow: 0,
+    },
+    modalScrollContent: {
+        flexGrow: 0,
+    },
+    modalBody: {
+        marginBottom: 24,
+    },
+    modalLabel: {
+        fontSize: 14,
+        fontFamily: 'Ubuntu_Medium',
+        marginBottom: 8,
+    },
+    modalInput: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Regular',
+        marginBottom: 8,
+    },
+    modalHint: {
+        fontSize: 12,
+        fontFamily: 'Ubuntu_Regular',
+    },
+    modalFooter: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+    },
+    modalCancelButton: {
+        flex: 1,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingVertical: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalCancelButtonText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Bold',
+    },
+    modalSearchButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 12,
+        paddingVertical: 14,
+        gap: 8,
+    },
+    modalSearchButtonText: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Bold',
+        color: '#FFFFFF',
     },
 });
