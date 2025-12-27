@@ -616,7 +616,7 @@ export default function DepartureDetailsScreen() {
                                     La liste des réservations
                                 </ThemedText>
                                 <Pressable style={{ backgroundColor: buttonBackgroundColor, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 }} onPress={() => console.log('Voir la liste des réservations')}>
-                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor, fontSize: 13 }]}>
+                                    <ThemedText style={[styles.detailValue, { color: "#FFFFFF", fontSize: 13 }]}>
                                         Voir la liste
                                     </ThemedText>
                                 </Pressable>
