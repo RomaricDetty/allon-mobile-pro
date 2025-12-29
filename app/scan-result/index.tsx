@@ -217,6 +217,7 @@ export default function ScanResultScreen() {
     const borderColor = isDark ? '#3A3A3C' : '#E0E0E0';
     const separatorColor = isDark ? '#3A3A3C' : '#E5E5E5';
     const successColor = '#34C759';
+    const warningColor = '#FF9500'; // Nouvelle couleur pour les avertissements
 
     /**
      * Gère le retour à l'écran précédent
@@ -339,6 +340,39 @@ export default function ScanResultScreen() {
         );
     };
 
+    /**
+     * Vérifie si tous les billets de la réservation ont le statut USED
+     * @returns true si tous les billets ont le statut USED
+     */
+    const areAllItemsUsed = (): boolean => {
+        if (!booking.items || booking.items.length === 0) {
+            return false;
+        }
+
+        // Vérifie si tous les éléments ont le statut USED
+        return booking.items.every((item: any) => {
+            const status = item.status?.toUpperCase();
+            return status === 'USED';
+        });
+    };
+
+    /**
+     * Calcule le nombre de billets qui n'ont pas encore le statut USED
+     * @returns Le nombre de billets restants à valider
+     */
+    const getRemainingItemsCount = (): number => {
+        if (!booking.items || booking.items.length === 0) {
+            return 0;
+        }
+
+        const unusedItems = booking.items.filter((item: any) => {
+            const status = item.status?.toUpperCase();
+            return status !== 'USED';
+        });
+
+        return unusedItems.length;
+    };
+
     return (
         <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#F3F3F7' }]}>
             {/* Barre de navigation / En-tête */}
@@ -386,21 +420,44 @@ export default function ScanResultScreen() {
                         },
                     ]}
                 >
-                    {/* Section de succès */}
-                    <View style={styles.successSection}>
-                        <View style={[styles.successIconContainer, { backgroundColor: successColor + '20' }]}>
-                            <MaterialIcons name="check-circle" size={48} color={successColor} />
-                        </View>
-                        <ThemedText style={[styles.successTitle, { color: primaryTextColor }]}>
-                            Scan validé avec succès
-                        </ThemedText>
-                        <ThemedText style={[styles.successSubtitle, { color: secondaryTextColor }]}>
-                            La réservation a été vérifiée
-                        </ThemedText>
-                    </View>
+                    {/* Section de succès - Tous les billets validés */}
+                    {areAllItemsUsed() && (
+                        <>
+                            <View style={styles.successSection}>
+                                <View style={[styles.successIconContainer, { backgroundColor: successColor + '20' }]}>
+                                    <MaterialIcons name="check-circle" size={48} color={successColor} />
+                                </View>
+                                <ThemedText style={[styles.successTitle, { color: primaryTextColor }]}>
+                                    Scan validé avec succès
+                                </ThemedText>
+                                <ThemedText style={[styles.successSubtitle, { color: secondaryTextColor }]}>
+                                    Tous les billets de la réservation ont été validés
+                                </ThemedText>
+                            </View>
+                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                        </>
+                    )}
 
-                    {/* Séparateur */}
-                    <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                    {/* Section d'information - Billets non encore tous validés */}
+                    {!areAllItemsUsed() && (
+                        <>
+                            <View style={styles.infoSection}>
+                                <View style={[styles.infoIconContainer, { backgroundColor: warningColor + '20' }]}>
+                                    <MaterialIcons name="info" size={48} color={warningColor} />
+                                </View>
+                                <ThemedText style={[styles.infoTitle, { color: primaryTextColor }]}>
+                                    Réservation à valider
+                                </ThemedText>
+                                <ThemedText style={[styles.infoSubtitle, { color: secondaryTextColor }]}>
+                                    {getRemainingItemsCount() > 0 
+                                        ? `${getRemainingItemsCount()} billet${getRemainingItemsCount() > 1 ? 's' : ''} restant${getRemainingItemsCount() > 1 ? 's' : ''} à valider`
+                                        : 'En attente de validation'
+                                    }
+                                </ThemedText>
+                            </View>
+                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                        </>
+                    )}
 
                     {/* Section : Code de réservation */}
                     <View style={styles.section}>
@@ -780,6 +837,29 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     successSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Ubuntu_Regular',
+        textAlign: 'center',
+    },
+    infoSection: {
+        alignItems: 'center',
+        paddingVertical: 24,
+    },
+    infoIconContainer: {
+        width: 96,
+        height: 96,
+        borderRadius: 48,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    infoTitle: {
+        fontSize: 22,
+        fontFamily: 'Ubuntu_Bold',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    infoSubtitle: {
         fontSize: 14,
         fontFamily: 'Ubuntu_Regular',
         textAlign: 'center',
