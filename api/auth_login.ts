@@ -38,3 +38,16 @@ export const authGetUserInfo = async (userId: string, token: string): Promise<Ax
 export const refreshTokenApi = async (token: string): Promise<AxiosResponse<any>> => {
     return await axios.post(`${baseUrl}/auth/refresh-token`, { refreshToken: token });
 }
+
+/**
+ * Get profile infos
+ * @param token - The user's token
+ * @returns AxiosResponse<any>
+ */
+export const getProfileInfos = async (token: string): Promise<AxiosResponse<any>> => {
+    return await axios.get(`${baseUrl}/auth/profile`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+}

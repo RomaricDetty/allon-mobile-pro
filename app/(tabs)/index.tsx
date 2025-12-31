@@ -1,3 +1,4 @@
+import { refreshTokenApi } from '@/api/auth_login';
 import { getUserDeparturesApi } from '@/api/departures';
 import { Departure, DepartureCard } from '@/components/departure-card';
 import { ThemedText } from '@/components/themed-text';
@@ -72,7 +73,7 @@ type DateFilterType = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 
 const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customDateTo?: Date): { dateFrom: Date | null; dateTo: Date | null } => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
+
     switch (filterType) {
         case 'today':
             // Pour aujourd'hui, on met la même date dans les deux paramètres
@@ -80,7 +81,7 @@ const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customD
                 dateFrom: today,
                 dateTo: today,
             };
-        
+
         case 'thisWeek':
             const dayOfWeek = now.getDay();
             const startOfWeek = new Date(today);
@@ -91,7 +92,7 @@ const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customD
                 dateFrom: startOfWeek,
                 dateTo: endOfWeek,
             };
-        
+
         case 'thisMonth':
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -99,7 +100,7 @@ const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customD
                 dateFrom: startOfMonth,
                 dateTo: endOfMonth,
             };
-        
+
         case 'thisYear':
             const startOfYear = new Date(now.getFullYear(), 0, 1);
             const endOfYear = new Date(now.getFullYear(), 11, 31);
@@ -107,7 +108,7 @@ const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customD
                 dateFrom: startOfYear,
                 dateTo: endOfYear,
             };
-        
+
         case 'custom':
             if (customDateFrom && customDateTo) {
                 const from = new Date(customDateFrom);
@@ -120,7 +121,7 @@ const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customD
                 };
             }
             return { dateFrom: null, dateTo: null };
-        
+
         default:
             return { dateFrom: null, dateTo: null };
     }
@@ -161,7 +162,7 @@ const extractStationCode = (stationName: string): string => {
  */
 const extractCityFromStation = (stationName: string): string | undefined => {
     if (!stationName) return undefined;
-    
+
     // Mapping des gares connues vers leurs villes
     const stationToCity: Record<string, string> = {
         'adjame': 'Abidjan',
@@ -171,16 +172,16 @@ const extractCityFromStation = (stationName: string): string | undefined => {
         'divo': 'Divo',
         'basilique': 'Yamoussoukro',
     };
-    
+
     const lowerName = stationName.toLowerCase();
-    
+
     // Chercher une correspondance dans le mapping
     for (const [key, city] of Object.entries(stationToCity)) {
         if (lowerName.includes(key)) {
             return city;
         }
     }
-    
+
     // Si pas de correspondance, essayer d'extraire le deuxième mot
     const words = stationName.trim().split(/\s+/);
     if (words.length > 1) {
@@ -189,7 +190,7 @@ const extractCityFromStation = (stationName: string): string | undefined => {
             return words[1].charAt(0).toUpperCase() + words[1].slice(1).toLowerCase();
         }
     }
-    
+
     return undefined;
 };
 
@@ -202,7 +203,7 @@ const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): Departure
     const durationMs = arrivalDate.getTime() - departureDate.getTime();
     const durationHours = Math.floor(durationMs / (1000 * 60 * 60));
     const durationMinutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
-    
+
     // Format de durée (ex: "21h 35m")
     let durationText = '';
     if (durationHours > 0) {
@@ -234,7 +235,7 @@ const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): Departure
     // Extraction des codes de stations
     const departureStationCode = extractStationCode(apiDeparture.trip.stationFrom.name);
     const arrivalStationCode = extractStationCode(apiDeparture.trip.stationTo.name);
-    
+
     // Extraction des villes
     const departureCity = extractCityFromStation(apiDeparture.trip.stationFrom.name);
     const arrivalCity = extractCityFromStation(apiDeparture.trip.stationTo.name);
@@ -296,6 +297,8 @@ export default function HomeScreen() {
     const [totalPages, setTotalPages] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const pageSize = 10;
+    const [isCheckingSession, setIsCheckingSession] = useState(true);
+    const [isSessionValid, setIsSessionValid] = useState(false);
 
     // États pour le filtre de date
     const [dateFilter, setDateFilter] = useState<DateFilterType>('all');
@@ -307,6 +310,91 @@ export default function HomeScreen() {
     const [showFilterModal, setShowFilterModal] = useState(false);
     // État pour suivre si les dates custom sont complètes
     const [customDatesReady, setCustomDatesReady] = useState(false);
+
+    /**
+     * Nettoie les données d'authentification stockées
+     */
+    const clearAuthData = useCallback(async () => {
+        await AsyncStorage.multiRemove([
+            'token',
+            'refresh_token',
+            'expires_at',
+            'expires_in',
+            'token_type',
+            'user_id',
+        ]);
+    }, []);
+
+    /**
+     * Vérifie et gère la session utilisateur
+     * - Vérifie si le token existe et est valide
+     * - Rafraîchit le token si nécessaire
+     * - Retourne true si la session est valide, false sinon
+     */
+    const checkUserSession = useCallback(async (): Promise<boolean> => {
+        try {
+            setIsCheckingSession(true);
+            const [token, expiresAt, refreshToken] = await Promise.all([
+                AsyncStorage.getItem('token'),
+                AsyncStorage.getItem('expires_at'),
+                AsyncStorage.getItem('refresh_token'),
+            ]);
+
+            // Si aucun token n'existe, rediriger vers l'écran de connexion
+            if (!token || !refreshToken) {
+                await clearAuthData();
+                router.replace('/login');
+                return false;
+            }
+
+            const currentDate = new Date();
+            const expiresAtDate = expiresAt ? new Date(Number(expiresAt) * 1000) : null;
+
+            // Vérifier si le token est expiré ou sur le point d'expirer (marge de 5 minutes)
+            const isTokenExpired = !expiresAtDate || expiresAtDate < new Date(currentDate.getTime() + 5 * 60 * 1000);
+
+            // Rafraîchir le token uniquement si nécessaire
+            if (isTokenExpired) {
+                try {
+                    const response = await refreshTokenApi(refreshToken);
+
+                    if (response.status === 200 && response.data?.access_token) {
+                        // Sauvegarder les nouveaux tokens
+                        await Promise.all([
+                            AsyncStorage.setItem('token', response.data.access_token),
+                            AsyncStorage.setItem('expires_at', String(response.data.expires_in)),
+                            AsyncStorage.setItem('token_type', response.data.token_type),
+                        ]);
+
+                        return true;
+                    }
+                } catch (refreshError) {
+                    console.error('Erreur lors du rafraîchissement du token:', refreshError);
+                    // Si le refresh échoue, nettoyer et rediriger vers l'écran de connexion
+                    await clearAuthData();
+                    router.replace('/login');
+                    return false;
+                }
+            }
+
+            // Si le token est encore valide
+            if (token) {
+                return true;
+            }
+
+            // Par défaut, rediriger vers l'écran de connexion
+            await clearAuthData();
+            router.replace('/login');
+            return false;
+        } catch (error) {
+            console.error('Erreur lors de la vérification de la session:', error);
+            await clearAuthData();
+            router.replace('/login');
+            return false;
+        } finally {
+            setIsCheckingSession(false);
+        }
+    }, [clearAuthData]);
 
     /**
      * Charge les départs depuis l'API avec filtrage par date
@@ -332,14 +420,15 @@ export default function HomeScreen() {
                 setError('Vous devez être connecté pour voir vos trajets');
                 setLoading(false);
                 setRefreshing(false);
+                setLoadingMore(false);
+                await clearAuthData();
                 router.replace('/login');
-                Alert.alert('Attention !', 'Vous devez être connecté pour voir vos trajets');
                 return;
             }
 
             // Construire les paramètres de requête
             let queryParams = `driverId=${userId}&pageSize=${pageSize}&page=${page}`;
-            
+
             // Ajouter les paramètres de date si un filtre est sélectionné
             if (dateFilter !== 'all') {
                 const { dateFrom, dateTo } = getDateRange(dateFilter, customDateFrom, customDateTo);
@@ -360,7 +449,7 @@ export default function HomeScreen() {
                 console.log('data.items departures ==>, ', data.items);
 
                 const transformedDepartures = data.items.map(transformApiDepartureToDeparture);
-                
+
                 if (isRefresh || page === 1) {
                     // Remplacer la liste pour la première page ou lors du refresh
                     setDepartures(transformedDepartures);
@@ -379,7 +468,7 @@ export default function HomeScreen() {
                 const calculatedTotalPages = Math.ceil(total / pageSize);
                 setTotalPages(calculatedTotalPages);
                 setCurrentPage(page);
-                
+
                 // Vérifier s'il y a encore des pages à charger
                 setHasMore(page < calculatedTotalPages);
             } else {
@@ -392,14 +481,16 @@ export default function HomeScreen() {
             console.error('Erreur lors du chargement des trajets:', err);
             setError('Impossible de charger les trajets. Veuillez réessayer.');
             if (err.response?.status === 401) {
-                Alert.alert('Session expirée', 'Votre session a expiré, veuillez vous reconnecter');
+                // Session expirée, nettoyer et rediriger vers login
+                await clearAuthData();
+                router.replace('/login');
             }
         } finally {
             setLoading(false);
             setLoadingMore(false);
             setRefreshing(false);
         }
-    }, [pageSize, dateFilter, customDateFrom, customDateTo]);
+    }, [pageSize, dateFilter, customDateFrom, customDateTo, clearAuthData]);
 
     /**
      * Gère le pull-to-refresh
@@ -418,7 +509,7 @@ export default function HomeScreen() {
         if (loadingMore || !hasMore || loading || refreshing) {
             return;
         }
-        
+
         const nextPage = currentPage + 1;
         if (nextPage <= totalPages) {
             loadDepartures(nextPage, false);
@@ -426,20 +517,37 @@ export default function HomeScreen() {
     }, [currentPage, hasMore, loadingMore, loading, refreshing, loadDepartures, totalPages]);
 
     /**
-     * Charge les départs au montage du composant et quand le filtre change
-     * Ne charge pas automatiquement pour le filtre 'custom'
+     * Vérifie la session au chargement du composant
      */
     useEffect(() => {
+        const verifySession = async () => {
+            const isValid = await checkUserSession();
+            setIsSessionValid(isValid);
+        };
+        verifySession();
+    }, [checkUserSession]);
+
+    /**
+     * Charge les départs au montage du composant et quand le filtre change
+     * Ne charge pas automatiquement pour le filtre 'custom'
+     * Ne charge que si la session est valide
+     */
+    useEffect(() => {
+        // Ne pas charger si la session n'est pas valide ou si on est en train de vérifier
+        if (isCheckingSession || !isSessionValid) {
+            return;
+        }
+
         // Ne pas charger automatiquement pour le filtre custom
         // Le chargement sera déclenché manuellement après la sélection des deux dates
         if (dateFilter === 'custom' && !customDatesReady) {
             return;
         }
-        
+
         setCurrentPage(1);
         setHasMore(true);
         loadDepartures(1, false);
-    }, [loadDepartures, dateFilter, customDatesReady]);
+    }, [loadDepartures, dateFilter, customDatesReady, isSessionValid, isCheckingSession]);
 
     /**
      * Gère le changement de filtre de date
@@ -448,7 +556,7 @@ export default function HomeScreen() {
         setDateFilter(filter);
         setShowFilterModal(false);
         setCustomDatesReady(false); // Réinitialiser l'état des dates custom
-        
+
         if (filter === 'custom') {
             // Initialiser les dates personnalisées si elles ne sont pas définies
             const today = new Date();
@@ -591,9 +699,11 @@ export default function HomeScreen() {
     const renderEmpty = () => {
         if (loading || refreshing) {
             return (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
-                    <ThemedText style={styles.loadingText}>Chargement des trajets...</ThemedText>
+                <View style={[styles.container, { backgroundColor }]}>
+                    <View style={styles.loadingContainer}>
+                        {/* <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} /> */}
+                        <ThemedText style={styles.loadingText}>Chargement des trajets...</ThemedText>
+                    </View>
                 </View>
             );
         }
@@ -641,7 +751,7 @@ export default function HomeScreen() {
                                 <MaterialIcons name="close" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
                             </TouchableOpacity>
                         </View>
-                        
+
                         <ScrollView style={styles.filterOptions}>
                             {filterOptions.map((option) => (
                                 <TouchableOpacity
@@ -649,15 +759,15 @@ export default function HomeScreen() {
                                     style={[
                                         styles.filterOption,
                                         dateFilter === option.type && styles.filterOptionActive,
-                                        { 
-                                            backgroundColor: dateFilter === option.type 
-                                                ? (isDark ? '#2C2C2E' : '#F3F3F7') 
-                                                : 'transparent' 
+                                        {
+                                            backgroundColor: dateFilter === option.type
+                                                ? (isDark ? '#2C2C2E' : '#F3F3F7')
+                                                : 'transparent'
                                         }
                                     ]}
                                     onPress={() => handleDateFilterChange(option.type)}
                                 >
-                                    <ThemedText 
+                                    <ThemedText
                                         style={[
                                             styles.filterOptionText,
                                             dateFilter === option.type && styles.filterOptionTextActive
@@ -666,10 +776,10 @@ export default function HomeScreen() {
                                         {option.label}
                                     </ThemedText>
                                     {dateFilter === option.type && (
-                                        <MaterialIcons 
-                                            name="check" 
-                                            size={20} 
-                                            color={isDark ? '#FFFFFF' : '#000000'} 
+                                        <MaterialIcons
+                                            name="check"
+                                            size={20}
+                                            color={isDark ? '#FFFFFF' : '#000000'}
                                         />
                                     )}
                                 </TouchableOpacity>
@@ -693,29 +803,46 @@ export default function HomeScreen() {
     const backgroundColor = isDark ? '#000000' : '#F3F3F7';
     const headerBackgroundColor = isDark ? '#000000' : '#F3F3F7';
 
+    // Afficher un loader pendant la vérification de la session
+    if (isCheckingSession) {
+        return (
+            <View style={[styles.container, { backgroundColor }]}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
+                    <ThemedText style={styles.loadingText}>Veuillez patienter...</ThemedText>
+                </View>
+            </View>
+        );
+    }
+
+    // Si la session n'est pas valide, ne rien afficher (redirection en cours)
+    if (!isSessionValid) {
+        return <View style={[styles.container, { backgroundColor }]} />;
+    }
+
     return (
         <View style={[styles.container, { backgroundColor }]}>
             {/* Header fixe */}
-            <ThemedView 
+            <ThemedView
                 style={[
-                    styles.header, 
-                    { 
+                    styles.header,
+                    {
                         backgroundColor: headerBackgroundColor,
                         paddingTop: insets.top + 16,
                     }
                 ]}
             >
                 <ThemedText type="title" style={styles.title}>Mes trajets</ThemedText>
-                
+
                 {/* Bouton de filtre */}
                 <TouchableOpacity
                     style={[styles.filterButton, { backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA' }]}
                     onPress={() => setShowFilterModal(true)}
                 >
-                    <MaterialIcons 
-                        name="filter-list" 
-                        size={20} 
-                        color={isDark ? '#FFFFFF' : '#000000'} 
+                    <MaterialIcons
+                        name="filter-list"
+                        size={20}
+                        color={isDark ? '#FFFFFF' : '#000000'}
                     />
                     <ThemedText style={styles.filterButtonText}>{getFilterLabel()}</ThemedText>
                     {dateFilter !== 'all' && (
@@ -730,8 +857,8 @@ export default function HomeScreen() {
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={[
-                    departures.length === 0 && !loading && !refreshing 
-                        ? styles.emptyContainer 
+                    departures.length === 0 && !loading && !refreshing
+                        ? styles.emptyContainer
                         : styles.contentContainer,
                     (loading || refreshing) && departures.length === 0 && styles.contentContainerLoading
                 ]}
@@ -925,7 +1052,7 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        minHeight: '100%',
+        // minHeight: '100%',
     },
     loadingText: {
         marginTop: 16,

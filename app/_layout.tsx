@@ -4,9 +4,10 @@ import { SplashScreen, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
+import CustomSplashScreen from '@/components/custom-splashscreen';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export const unstable_settings = {
     anchor: '(tabs)',
@@ -24,9 +25,9 @@ function AppContent() {
     return (
         <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <Stack screenOptions={{ animation: 'slide_from_right' }}>
-                <Stack.Screen name="index" options={{ headerShown: false }} />
-                <Stack.Screen name="login/index" options={{ headerShown: false }} />
+                {/* <Stack.Screen name="index" options={{ headerShown: false }} /> */}
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="login/index" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-qr/index" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-result/index" options={{ headerShown: false }} />
                 <Stack.Screen name="departure-details/index" options={{ headerShown: false }} />
@@ -43,6 +44,8 @@ function AppContent() {
 }
 
 export default function RootLayout() {
+
+    const [isAppReady, setIsAppReady] = useState(false);
     // Charge toutes les fonts Ubuntu nécessaires
     const [fontsLoaded, fontsError] = useFonts({
         Ubuntu_Bold: require("@/assets/fonts/Ubuntu-Bold.ttf"),
@@ -54,6 +57,7 @@ export default function RootLayout() {
         Ubuntu_MediumItalic: require("@/assets/fonts/Ubuntu-MediumItalic.ttf"),
         Ubuntu_Regular: require("@/assets/fonts/Ubuntu-Regular.ttf"),
     });
+    
 
     /**
      * Cache le splash screen une fois les fonts chargées
@@ -68,6 +72,10 @@ export default function RootLayout() {
                 await SplashScreen.hideAsync();
             } catch (error) {
                 console.warn('Splash déjà caché:', error);
+            } finally {
+                setTimeout(() => {
+                    setIsAppReady(true);
+                }, 2500);
             }
         };
 
@@ -76,6 +84,10 @@ export default function RootLayout() {
 
     if (!fontsLoaded && !fontsError) {
         return null;
+    }
+
+    if (!isAppReady) {
+        return <CustomSplashScreen />;
     }
 
     return (

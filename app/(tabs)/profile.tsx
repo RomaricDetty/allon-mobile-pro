@@ -1,13 +1,39 @@
-import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
+import { getProfileInfos } from '@/api/auth_login';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ThemePreference, useThemePreference } from '@/hooks/use-theme-preference';
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+/**
+ * Interface pour les informations du profil utilisateur
+ */
+interface ProfileInfo {
+    firstName: string;
+    lastName: string;
+    email: string;
+    civility: string;
+    dateOfBirth?: string;
+    phones?: Array<{ digits: string; type: string }>;
+    role?: {
+        name: string;
+        code: string;
+        description: string;
+    };
+    company?: {
+        fullName: string;
+        abbreviation: string;
+        email: string;
+    };
+    station?: {
+        name: string;
+        address: string;
+    };
+}
 
 /**
  * Écran de profil utilisateur
@@ -19,7 +45,8 @@ export default function ProfileScreen() {
     const insets = useSafeAreaInsets();
     const { themePreference, setThemePreference, isLoading } = useThemePreference();
     const [isLoggingOut, setIsLoggingOut] = useState(false);
-
+    const [profileInfos, setProfileInfos] = useState<ProfileInfo | null>(null);
+    const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     // Couleurs dynamiques basées sur le thème
     const backgroundColor = isDark ? '#000000' : '#F3F3F7';
     const cardBackgroundColor = isDark ? '#1A1A1A' : '#FFFFFF';
@@ -81,6 +108,29 @@ export default function ProfileScreen() {
     };
 
     /**
+     * Récupère les infos du profil de l'utilisateur
+     */
+    const getInfosProfile = async () => {
+        try {
+            setIsLoadingProfile(true);
+            const token = await AsyncStorage.getItem('token');
+            if (token) {
+                const response = await getProfileInfos(token);
+                console.log('Réponse des infos de profil : ', response.data);
+                setProfileInfos(response.data);
+            }
+        } catch (error) {
+            console.error('Erreur lors de la récupération des infos de profil : ', error);
+        } finally {
+            setIsLoadingProfile(false);
+        }
+    };
+
+    useEffect(() => {
+        getInfosProfile();
+    }, []);
+
+    /**
      * Détermine si le switch doit être activé
      * Si la préférence est 'system', on se base sur le thème actuel
      */
@@ -109,6 +159,146 @@ export default function ProfileScreen() {
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
+                {/* Section Informations du profil */}
+                <View
+                    style={[
+                        styles.section,
+                        {
+                            backgroundColor: cardBackgroundColor,
+                            borderColor: borderColor,
+                        },
+                    ]}
+                >
+                    {/* Avatar utilisateur */}
+                    <View style={styles.avatarContainer}>
+                        <View
+                            style={[
+                                styles.avatarCircle,
+                                {
+                                    backgroundColor: isDark ? '#2C2C2E' : '#E5E5E5',
+                                    borderColor: isDark ? '#3A3A3C' : '#E0E0E0',
+                                },
+                            ]}
+                        >
+                            <MaterialIcons
+                                name="account-circle"
+                                size={60}
+                                color={isDark ? '#9BA1A6' : '#666666'}
+                            />
+                        </View>
+                    </View>
+
+                    <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
+                        Informations personnelles
+                    </ThemedText>
+
+                    {isLoadingProfile ? (
+                        <View style={styles.loadingContainer}>
+                            <ActivityIndicator size="large" color="#1776BA" />
+                            <ThemedText style={[styles.loadingText, { color: secondaryTextColor }]}>
+                                Chargement des informations...
+                            </ThemedText>
+                        </View>
+                    ) : profileInfos ? (
+                        <>
+
+                            {/* Nom complet */}
+                            <View style={[styles.infoRow, { borderTopColor: separatorColor }]}>
+                                <View style={styles.infoLabelContainer}>
+                                    <MaterialIcons name="person" size={20} color={secondaryTextColor} />
+                                    <ThemedText style={[styles.infoLabel, { color: secondaryTextColor }]}>
+                                        Nom & Prénom(s)
+                                    </ThemedText>
+                                </View>
+                                <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                                    {profileInfos.civility === 'MR' ? 'M.' : profileInfos.civility === 'MRS' ? 'Mme' : ''}{' '}
+                                    {profileInfos.firstName} {profileInfos.lastName}
+                                </ThemedText>
+                            </View>
+
+                            {/* Email */}
+                            <View style={[styles.infoRow, { borderTopColor: separatorColor }]}>
+                                <View style={styles.infoLabelContainer}>
+                                    <MaterialIcons name="email" size={20} color={secondaryTextColor} />
+                                    <ThemedText style={[styles.infoLabel, { color: secondaryTextColor }]}>
+                                        Email
+                                    </ThemedText>
+                                </View>
+                                <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                                    {profileInfos.email}
+                                </ThemedText>
+                            </View>
+
+                            {/* Téléphone */}
+                            {profileInfos.phones && profileInfos.phones.length > 0 && (
+                                <View style={[styles.infoRow, { borderTopColor: separatorColor }]}>
+                                    <View style={styles.infoLabelContainer}>
+                                        <MaterialIcons name="phone" size={20} color={secondaryTextColor} />
+                                        <ThemedText style={[styles.infoLabel, { color: secondaryTextColor }]}>
+                                            Téléphone
+                                        </ThemedText>
+                                    </View>
+                                    <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                                        {profileInfos.phones[0].digits}
+                                    </ThemedText>
+                                </View>
+                            )}
+
+                            {/* Rôle */}
+                            {profileInfos.role && (
+                                <View style={[styles.infoRow, { borderTopColor: separatorColor }]}>
+                                    <View style={styles.infoLabelContainer}>
+                                        <MaterialIcons name="badge" size={20} color={secondaryTextColor} />
+                                        <ThemedText style={[styles.infoLabel, { color: secondaryTextColor }]}>
+                                            Rôle
+                                        </ThemedText>
+                                    </View>
+                                    <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                                        {profileInfos.role.name}
+                                    </ThemedText>
+                                </View>
+                            )}
+
+                            {/* Entreprise */}
+                            {profileInfos.company && (
+                                <View style={[styles.infoRow, { borderTopColor: separatorColor }]}>
+                                    <View style={styles.infoLabelContainer}>
+                                        <MaterialIcons name="business" size={20} color={secondaryTextColor} />
+                                        <ThemedText style={[styles.infoLabel, { color: secondaryTextColor }]}>
+                                            Compagnie
+                                        </ThemedText>
+                                    </View>
+                                    <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                                        {profileInfos.company.fullName}
+                                    </ThemedText>
+                                </View>
+                            )}
+
+                            {/* Station */}
+                            {profileInfos.station && (
+                                <View style={[styles.infoRow, { borderTopColor: separatorColor }]}>
+                                    <View style={styles.infoLabelContainer}>
+                                        <MaterialIcons name="location-on" size={20} color={secondaryTextColor} />
+                                        <ThemedText style={[styles.infoLabel, { color: secondaryTextColor }]}>
+                                            Gare
+                                        </ThemedText>
+                                    </View>
+                                    <View style={styles.infoValueContainer}>
+                                        <ThemedText style={[styles.infoValue, { color: primaryTextColor, marginLeft: 0 }]}>
+                                            {profileInfos.station.name}
+                                        </ThemedText>
+                                        {profileInfos.station.address && (
+                                            <ThemedText style={[styles.infoSubValue, { color: secondaryTextColor }]}>
+                                                {profileInfos.station.address}
+                                            </ThemedText>
+                                        )}
+                                    </View>
+                                </View>
+                            )}
+                        </>
+                    ) : null}
+                </View>
+
                 {/* Section Préférences */}
                 <View
                     style={[
@@ -116,6 +306,7 @@ export default function ProfileScreen() {
                         {
                             backgroundColor: cardBackgroundColor,
                             borderColor: borderColor,
+                            marginTop: 16,
                         },
                     ]}
                 >
@@ -284,6 +475,58 @@ const styles = StyleSheet.create({
     },
     themeToggleDescription: {
         fontSize: 12,
+        fontFamily: 'Ubuntu_Regular',
+    },
+    infoRow: {
+        paddingTop: 16,
+        borderTopWidth: 1,
+        marginTop: 8,
+    },
+    infoLabelContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 8,
+    },
+    infoLabel: {
+        fontSize: 14,
+        fontFamily: 'Ubuntu_Medium',
+    },
+    infoValue: {
+        fontSize: 16,
+        fontFamily: 'Ubuntu_Regular',
+        marginLeft: 28,
+    },
+    infoValueContainer: {
+        marginLeft: 28,
+    },
+    infoSubValue: {
+        fontSize: 12,
+        fontFamily: 'Ubuntu_Regular',
+        marginTop: 4,
+    },
+    avatarContainer: {
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    avatarCircle: {
+        width: 80,
+        height: 80,
+        borderRadius: 60,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 3,
+        // borderColor: '#1776BA',
+    },
+    loadingContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 40,
+        gap: 16,
+        minHeight: 200,
+    },
+    loadingText: {
+        fontSize: 14,
         fontFamily: 'Ubuntu_Regular',
     },
 });
