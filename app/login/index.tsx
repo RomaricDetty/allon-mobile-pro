@@ -44,18 +44,20 @@ const Login = () => {
             setIsLoading(true);
 
             const response = await authLogin({ emailOrUsername: email.trim().toLowerCase(), password: password.trim() })
-            console.log('Réponse de la connexion : ', response);
-            console.log('response.data ==>, ', response.data)
-            console.log('response.data.customerProfile ==>, ', response.data?.customerProfile)
             if (response.status === 200) {
 
                 if (response.data?.user?.role && response.data?.user?.role instanceof Object) {
+                    // Calculer le timestamp d'expiration en ajoutant expires_in (en secondes) à la date actuelle
+                    const expiresInSeconds = response.data.expires_in || 3600; // Par défaut 1 heure si non fourni
+                    const expiresAtTimestamp = Math.floor(Date.now() / 1000) + expiresInSeconds;
+                    
                     AsyncStorage.setItem('token', response.data.access_token);
                     AsyncStorage.setItem('refresh_token', response.data.refresh_token);
-                    AsyncStorage.setItem('expires_at', String(response.data.expires_in));
+                    AsyncStorage.setItem('expires_at', String(expiresAtTimestamp));
                     AsyncStorage.setItem('token_type', response.data.token_type);
                     AsyncStorage.setItem('user_id', response.data.user.id);
-                    console.log('user_id : ', response.data.user.id);
+                    AsyncStorage.setItem('user_role', response.data.user.role.code.toLowerCase());
+                    AsyncStorage.setItem('company_id', response.data.user.company.id);
                     router.replace('/(tabs)');
 
                     return;
@@ -66,7 +68,6 @@ const Login = () => {
             }
 
             Alert.alert('Attention !', response.data.message);
-            console.log('Erreur lors de la connexion : ', response.data);
             return;
 
         } catch (error) {

@@ -9,10 +9,16 @@ import { baseUrl } from "./config"
  * @returns AxiosResponse<any>
  */
 export const authLogin = async (data: any): Promise<AxiosResponse<any>> => {
-    console.log("data ==>, ", data)
-    console.log("baseUrl ==>, ", baseUrl)
-    console.log("url ==>, ", `${baseUrl}/auth/login`)
-    return await axios.post(`${baseUrl}/auth/login`, data)
+    
+    const headersToSend = {
+        "X-App-Audience": "backoffice_mobile",
+    }
+    return await axios.post(
+        `${baseUrl}/auth/login`, data,
+        {
+            headers: headersToSend,
+        }
+    )
 }
 
 /**

@@ -25,7 +25,7 @@ function AppContent() {
     return (
         <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <Stack screenOptions={{ animation: 'slide_from_right' }}>
-                {/* <Stack.Screen name="index" options={{ headerShown: false }} /> */}
+                <Stack.Screen name="index" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="login/index" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-qr/index" options={{ headerShown: false }} />
@@ -33,6 +33,8 @@ function AppContent() {
                 <Stack.Screen name="departure-details/index" options={{ headerShown: false }} />
                 <Stack.Screen name="track-route/index" options={{ headerShown: false }} />
                 <Stack.Screen name="profile/index" options={{ headerShown: false }} />
+                <Stack.Screen name="bookings/index" options={{ headerShown: false }} />
+                <Stack.Screen name="booking-details/index" options={{ headerShown: false }} />
                 {/* <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} /> */}
             </Stack>
             <StatusBar
@@ -46,6 +48,8 @@ function AppContent() {
 export default function RootLayout() {
 
     const [isAppReady, setIsAppReady] = useState(false);
+    const [isCustomSplashMounted, setIsCustomSplashMounted] = useState(false);
+
     // Charge toutes les fonts Ubuntu nécessaires
     const [fontsLoaded, fontsError] = useFonts({
         Ubuntu_Bold: require("@/assets/fonts/Ubuntu-Bold.ttf"),
@@ -68,6 +72,11 @@ export default function RootLayout() {
                 return;
             }
 
+            // Attendre que le CustomSplashScreen soit monté
+            if (!isCustomSplashMounted) {
+                return;
+            }
+
             try {
                 await SplashScreen.hideAsync();
             } catch (error) {
@@ -80,14 +89,14 @@ export default function RootLayout() {
         };
 
         hideSplash();
-    }, [fontsLoaded, fontsError]);
+    }, [fontsLoaded, fontsError, isCustomSplashMounted]);
 
     if (!fontsLoaded && !fontsError) {
         return null;
     }
 
     if (!isAppReady) {
-        return <CustomSplashScreen />;
+        return <CustomSplashScreen onLayout={() => setIsCustomSplashMounted(true)} />;
     }
 
     return (

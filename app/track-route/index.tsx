@@ -1,25 +1,30 @@
+import { Departure } from "@/components/departure-card";
 import { ThemedText } from "@/components/themed-text";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useDimensions } from "@/hooks/use-dimensions";
+import { calculateDistance } from "@/utils/location";
+import { logError, logWithTag } from "@/utils/logger";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { router } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
-    Dimensions,
+    Animated,
+    Modal,
     StyleSheet,
     TouchableOpacity,
     View,
 } from "react-native";
 import MapView, { type Region } from "react-native-maps";
 
+import { markAsStatusDepartureApi } from "@/api/departures";
 import UserMarker from "@/components/map/user-marker";
+import { departureEventEmitter } from "@/utils/departure-events";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const { width, height } = Dimensions.get("window");
-const ASPECT_RATIO = width / height;
 const DEFAULT_LATITUDE_DELTA = 0.0922;
-const DEFAULT_LONGITUDE_DELTA = DEFAULT_LATITUDE_DELTA * ASPECT_RATIO;
 
 const LOCATION_CONFIG: Location.LocationOptions = {
     accuracy: Location.Accuracy.BestForNavigation,
@@ -27,12 +32,7 @@ const LOCATION_CONFIG: Location.LocationOptions = {
     distanceInterval: 5,
 };
 
-const DEFAULT_LOCATION = {
-    latitude: 5.320357,
-    longitude: -4.016107,
-    latitudeDelta: DEFAULT_LATITUDE_DELTA,
-    longitudeDelta: DEFAULT_LONGITUDE_DELTA,
-};
+// DEFAULT_LOCATION sera créé dynamiquement avec useMemo
 
 // Seuils de filtrage (plus permissifs pour éviter de bloquer le démarrage)
 const MIN_ACCURACY = 100;
@@ -50,39 +50,24 @@ interface LocationData {
     accuracy: number | null;
 }
 
-/**
- * Calcule la distance entre deux coordonnées (formule de Haversine)
- */
-const calculateDistance = (
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-): number => {
-    const R = 6371e3;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a =
-        Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-};
 
 /**
  * Écran de suivi de trajet
  * Affiche la position du conducteur en temps réel
  */
 export default function TrackRouteScreen() {
+    const dimensions = useDimensions();
     const mapViewRef = useRef<MapView>(null);
     const locationWatcherRef = useRef<Location.LocationSubscription | null>(null);
+    const params = useLocalSearchParams<{ departure: string }>();
+    
+    // Calculer les deltas en fonction des dimensions
+    const aspectRatio = useMemo(() => dimensions.width / dimensions.height, [dimensions.width, dimensions.height]);
+    const defaultLongitudeDelta = useMemo(() => DEFAULT_LATITUDE_DELTA * aspectRatio, [aspectRatio]);
+    
     const zoomRef = useRef({
         latitudeDelta: DEFAULT_LATITUDE_DELTA,
-        longitudeDelta: DEFAULT_LONGITUDE_DELTA,
+        longitudeDelta: defaultLongitudeDelta,
     });
 
     const previousLocationRef = useRef<{
@@ -98,8 +83,15 @@ export default function TrackRouteScreen() {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === "dark";
 
+    const defaultLocation = useMemo(() => ({
+        latitude: 5.320357,
+        longitude: -4.016107,
+        latitudeDelta: DEFAULT_LATITUDE_DELTA,
+        longitudeDelta: defaultLongitudeDelta,
+    }), [defaultLongitudeDelta]);
+
     const [currentUserLocation, setCurrentUserLocation] = useState<LocationData>({
-        ...DEFAULT_LOCATION,
+        ...defaultLocation,
         heading: null,
         speed: null,
         accuracy: null,
@@ -111,8 +103,91 @@ export default function TrackRouteScreen() {
         totalUpdates: 0,
         rejectedUpdates: 0,
     });
+    const [showActionModal, setShowActionModal] = useState(false);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [pendingAction, setPendingAction] = useState<"boarding" | "startRoute" | "finishRoute" | null>(null);
+    const [isBoardingLoading, setIsBoardingLoading] = useState(false);
+    const [isStartRouteLoading, setIsStartRouteLoading] = useState(false);
+    const [isFinishLoading, setIsFinishLoading] = useState(false);
+
+    // Animation pour l'effet slide du modal de confirmation
+    const slideAnim = useRef(new Animated.Value(0)).current;
+    // Animation pour l'effet slide du modal d'actions
+    const actionSlideAnim = useRef(new Animated.Value(0)).current;
 
     const iconCircleBackgroundColor = isDark ? "#2C2C2E" : "#F8F8F8";
+
+    /**
+     * Parse et mémorise les données du départ initiales
+     */
+    const initialDeparture = useMemo<Departure | null>(() => {
+        try {
+            if (params?.departure) {
+                return JSON.parse(params.departure) as Departure;
+            }
+        } catch (error) {
+            logError("[TRACK-ROUTE] Erreur lors du parsing du départ:", error);
+        }
+        return null;
+    }, [params?.departure]);
+
+    /**
+     * État local pour le départ (mis à jour après chaque action)
+     */
+    const [currentDeparture, setCurrentDeparture] = useState<Departure | null>(initialDeparture);
+
+    /**
+     * Met à jour le départ local quand le départ initial change
+     */
+    useEffect(() => {
+        setCurrentDeparture(initialDeparture);
+    }, [initialDeparture]);
+
+    const departure = currentDeparture;
+
+    /**
+     * Vérifie si le statut du départ est SCHEDULED
+     */
+    const isScheduled = useMemo(() => {
+        return departure?.status?.toUpperCase() === "SCHEDULED";
+    }, [departure?.status]);
+
+    /**
+     * Vérifie si le statut du départ est BOARDING
+     */
+    const isBoarding = useMemo(() => {
+        return departure?.status?.toUpperCase() === "BOARDING";
+    }, [departure?.status]);
+
+    /**
+     * Vérifie si le statut du départ est DEPARTED
+     */
+    const isDeparted = useMemo(() => {
+        return departure?.status?.toUpperCase() === "DEPARTED";
+    }, [departure?.status]);
+
+    /**
+     * Vérifie si le statut du départ est ARRIVED
+     */
+    const isArrived = useMemo(() => {
+        return departure?.status?.toUpperCase() === "ARRIVED";
+    }, [departure?.status]);
+
+    /**
+     * Vérifie si l'action d'embarquement peut être effectuée
+     * L'embarquement n'est possible que si le statut est SCHEDULED
+     */
+    const canPerformBoarding = useMemo(() => {
+        return isScheduled && !isBoarding && !isDeparted && !isArrived;
+    }, [isScheduled, isBoarding, isDeparted, isArrived]);
+
+    /**
+     * Vérifie si le trajet peut être démarré
+     * Le démarrage est possible si le statut est SCHEDULED ou BOARDING
+     */
+    const canStartRoute = useMemo(() => {
+        return (isScheduled || isBoarding) && !isDeparted && !isArrived;
+    }, [isScheduled, isBoarding, isDeparted, isArrived]);
 
     /**
      * Valide la qualité d'une position GPS
@@ -122,13 +197,14 @@ export default function TrackRouteScreen() {
             // Pendant le warm-up, accepter toutes les positions
             if (isWarmingUp && warmUpCountRef.current < WARMUP_UPDATES) {
                 warmUpCountRef.current++;
-                console.log(
-                    `[LOCATION] Warm-up ${warmUpCountRef.current}/${WARMUP_UPDATES} - position acceptée`
+                logWithTag(
+                    "LOCATION",
+                    `Warm-up ${warmUpCountRef.current}/${WARMUP_UPDATES} - position acceptée`
                 );
 
                 if (warmUpCountRef.current >= WARMUP_UPDATES) {
                     setIsWarmingUp(false);
-                    console.log("[LOCATION] Warm-up terminé, filtrage activé");
+                    logWithTag("LOCATION", "Warm-up terminé, filtrage activé");
                 }
                 return true;
             }
@@ -136,15 +212,12 @@ export default function TrackRouteScreen() {
             const { accuracy, speed } = location.coords;
 
             if (accuracy && accuracy > MIN_ACCURACY) {
-                console.log(
-                    "[LOCATION] Position rejetée - précision insuffisante:",
-                    accuracy
-                );
+                logWithTag("LOCATION", "Position rejetée - précision insuffisante:", accuracy);
                 return false;
             }
 
             if (speed && speed > MAX_SPEED) {
-                console.log("[LOCATION] Position rejetée - vitesse anormale:", speed);
+                logWithTag("LOCATION", "Position rejetée - vitesse anormale:", speed);
                 return false;
             }
 
@@ -165,10 +238,7 @@ export default function TrackRouteScreen() {
                 }
 
                 if (calculatedSpeed > MAX_SPEED) {
-                    console.log(
-                        "[LOCATION] Position rejetée - vitesse calculée anormale:",
-                        calculatedSpeed
-                    );
+                    logWithTag("LOCATION", "Position rejetée - vitesse calculée anormale:", calculatedSpeed);
                     return false;
                 }
             }
@@ -179,7 +249,18 @@ export default function TrackRouteScreen() {
     );
 
     /**
+     * Calcule le niveau de zoom à partir des deltas de région
+     * Formule approximative : zoom ≈ log2(360 / latitudeDelta)
+     */
+    const calculateZoomFromDelta = useCallback((latitudeDelta: number): number => {
+        // Approximation : zoom 15 ≈ 0.01 delta, zoom 10 ≈ 0.1 delta
+        const zoom = Math.log2(360 / latitudeDelta);
+        return Math.max(10, Math.min(20, zoom)); // Limiter entre 10 et 20
+    }, []);
+
+    /**
      * Met à jour la caméra de manière intelligente
+     * Optimisé pour un suivi fluide et performant
      */
     const updateCameraPosition = useCallback(
         (latitude: number, longitude: number, heading: number | null) => {
@@ -190,30 +271,41 @@ export default function TrackRouteScreen() {
             const now = Date.now();
             const timeSinceLastUpdate = now - lastCameraUpdateRef.current;
 
-            if (timeSinceLastUpdate < 2000) {
+            // Réduire le throttling à 500ms pour un suivi plus fluide
+            if (timeSinceLastUpdate < 500) {
                 return;
             }
 
             lastCameraUpdateRef.current = now;
 
+            // Calculer le zoom actuel à partir des deltas pour le préserver
+            const currentZoom = calculateZoomFromDelta(zoomRef.current.latitudeDelta);
+
             if (heading !== null && heading >= 0) {
+                // Si on a un heading, utiliser animateCamera pour la rotation
+                // Préserver le zoom actuel
                 mapViewRef.current?.animateCamera(
                     {
                         center: { latitude, longitude },
                         heading: heading,
+                        zoom: currentZoom,
                     },
-                    { duration: 1000 }
+                    { duration: 500 } // Durée réduite pour plus de réactivité
                 );
             } else {
-                mapViewRef.current?.animateCamera(
+                // Sinon, utiliser animateToRegion (plus performant)
+                mapViewRef.current?.animateToRegion(
                     {
-                        center: { latitude, longitude },
+                        latitude,
+                        longitude,
+                        latitudeDelta: zoomRef.current.latitudeDelta,
+                        longitudeDelta: zoomRef.current.longitudeDelta,
                     },
-                    { duration: 1000 }
+                    500
                 );
             }
         },
-        []
+        [calculateZoomFromDelta]
     );
 
     /**
@@ -221,7 +313,7 @@ export default function TrackRouteScreen() {
      */
     const handleLocationUpdate = useCallback(
         (location: Location.LocationObject) => {
-            console.log("[LOCATION] Nouvelle position reçue:", {
+            logWithTag("LOCATION", "Nouvelle position reçue:", {
                 latitude: location.coords.latitude.toFixed(6),
                 longitude: location.coords.longitude.toFixed(6),
                 accuracy: location.coords.accuracy?.toFixed(2),
@@ -242,13 +334,13 @@ export default function TrackRouteScreen() {
                     ...prev,
                     rejectedUpdates: prev.rejectedUpdates + 1,
                 }));
-                console.log("[LOCATION] Position rejetée");
+                logWithTag("LOCATION", "Position rejetée");
                 return;
             }
 
             const { latitude, longitude, heading, speed, accuracy } = location.coords;
 
-            // Mettre à jour la position
+            // Mettre à jour la position du marker (toujours, même si le trajet n'est pas démarré)
             setCurrentUserLocation((prev) => ({
                 latitude,
                 longitude,
@@ -260,6 +352,7 @@ export default function TrackRouteScreen() {
             }));
 
             // Mettre à jour la caméra si le trajet est démarré
+            // Le marker se met toujours à jour pour afficher la position en temps réel
             if (isRouteStarted) {
                 updateCameraPosition(latitude, longitude, heading);
             }
@@ -279,7 +372,7 @@ export default function TrackRouteScreen() {
      */
     const stopTracking = useCallback(() => {
         if (locationWatcherRef.current) {
-            console.log("[LOCATION] Arrêt du suivi de position");
+            logWithTag("LOCATION", "Arrêt du suivi de position");
             locationWatcherRef.current.remove();
             locationWatcherRef.current = null;
         }
@@ -301,7 +394,7 @@ export default function TrackRouteScreen() {
 
         const startLocationTracking = async () => {
             try {
-                console.log("[LOCATION] Demande de permission...");
+                logWithTag("LOCATION", "Demande de permission...");
                 const { status } = await Location.requestForegroundPermissionsAsync();
 
                 if (status !== "granted") {
@@ -314,7 +407,7 @@ export default function TrackRouteScreen() {
                     return;
                 }
 
-                console.log("[LOCATION] Permission accordée, récupération de la position...");
+                logWithTag("LOCATION", "Permission accordée, récupération de la position...");
 
                 // Obtenir la position initiale
                 const initialLocation = await Location.getCurrentPositionAsync({
@@ -325,7 +418,7 @@ export default function TrackRouteScreen() {
                     const { latitude, longitude, heading, speed, accuracy } =
                         initialLocation.coords;
 
-                    console.log("[LOCATION] Position initiale obtenue:", {
+                    logWithTag("LOCATION", "Position initiale obtenue:", {
                         latitude: latitude.toFixed(6),
                         longitude: longitude.toFixed(6),
                         accuracy: accuracy?.toFixed(2),
@@ -346,12 +439,28 @@ export default function TrackRouteScreen() {
                         timestamp: initialLocation.timestamp,
                     };
 
+                    // Centrer la carte sur la position obtenue
+                    setTimeout(() => {
+                        if (mapViewRef.current) {
+                            mapViewRef.current.animateToRegion(
+                                {
+                                    latitude,
+                                    longitude,
+                                    latitudeDelta: DEFAULT_LATITUDE_DELTA,
+                                    longitudeDelta: defaultLongitudeDelta,
+                                },
+                                500
+                            );
+                            logWithTag("MAP", "Carte centrée sur la position initiale");
+                        }
+                    }, 100);
+
                     // Masquer le loader dès qu'on a la position initiale
                     setIsLoading(false);
-                    console.log("[LOCATION] Loader masqué");
+                    logWithTag("LOCATION", "Loader masqué");
                 }
 
-                console.log("[LOCATION] Démarrage du suivi en temps réel...");
+                logWithTag("LOCATION", "Démarrage du suivi en temps réel...");
 
                 // Démarre le suivi de position en temps réel
                 const watcher = await Location.watchPositionAsync(
@@ -363,9 +472,9 @@ export default function TrackRouteScreen() {
                 );
 
                 locationWatcherRef.current = watcher;
-                console.log("[LOCATION] Suivi de position démarré");
+                logWithTag("LOCATION", "Suivi de position démarré");
             } catch (error) {
-                console.error("[LOCATION] Erreur lors de l'initialisation:", error);
+                logError("[LOCATION] Erreur lors de l'initialisation:", error);
                 Alert.alert(
                     "Erreur",
                     "Une erreur est survenue lors de l'accès à la localisation.",
@@ -513,36 +622,449 @@ export default function TrackRouteScreen() {
      * Callback au chargement de la carte
      */
     const handleMapLoaded = useCallback(() => {
-        console.log("[MAP] Carte chargée");
-        mapViewRef.current?.animateCamera({
-            center: {
-                latitude: currentUserLocation.latitude,
-                longitude: currentUserLocation.longitude,
-            },
-            pitch: 0,
-            heading: 0,
-            altitude: 1000,
-            zoom: 15,
-        });
-    }, [currentUserLocation.latitude, currentUserLocation.longitude]);
+        logWithTag("MAP", "Carte chargée");
+        // Ne centrer que si on a une position réelle (pas la position par défaut)
+        const isDefaultLocation = 
+            currentUserLocation.latitude === defaultLocation.latitude &&
+            currentUserLocation.longitude === defaultLocation.longitude;
+        
+        if (!isDefaultLocation && !isLoading) {
+            mapViewRef.current?.animateCamera({
+                center: {
+                    latitude: currentUserLocation.latitude,
+                    longitude: currentUserLocation.longitude,
+                },
+                pitch: 0,
+                heading: currentUserLocation.heading || 0,
+                altitude: 1000,
+                zoom: 15,
+            });
+        }
+    }, [currentUserLocation.latitude, currentUserLocation.longitude, currentUserLocation.heading, defaultLocation.latitude, defaultLocation.longitude, isLoading]);
 
     /**
-     * Gère le démarrage/arrêt du trajet
+     * Centre automatiquement la carte quand la position est obtenue
      */
-    const handleStartRoute = useCallback(() => {
-        if (isRouteStarted) {
-            console.log("[ROUTE] Arrêt du trajet");
-            setIsRouteStarted(false);
-            isUserInteractingRef.current = false;
-        } else {
-            console.log("[ROUTE] Démarrage du trajet");
+    useEffect(() => {
+        if (!isLoading && mapViewRef.current) {
+            // Vérifier qu'on a une position réelle (pas la position par défaut)
+            const isDefaultLocation = 
+                currentUserLocation.latitude === defaultLocation.latitude &&
+                currentUserLocation.longitude === defaultLocation.longitude;
+            
+            if (!isDefaultLocation) {
+                // Attendre un peu pour s'assurer que la carte est prête
+                const timer = setTimeout(() => {
+                    mapViewRef.current?.animateToRegion(
+                        {
+                            latitude: currentUserLocation.latitude,
+                            longitude: currentUserLocation.longitude,
+                            latitudeDelta: DEFAULT_LATITUDE_DELTA,
+                            longitudeDelta: defaultLongitudeDelta,
+                        },
+                        500
+                    );
+                    logWithTag("MAP", "Carte centrée automatiquement sur la position");
+                }, 300);
+
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [isLoading, currentUserLocation.latitude, currentUserLocation.longitude, defaultLocation.latitude, defaultLocation.longitude, defaultLongitudeDelta]);
+
+    /**
+     * Active automatiquement le suivi de la caméra si le statut est DEPARTED
+     * Cela garantit que la carte suit le marker même si l'utilisateur arrive sur l'écran
+     * alors que le trajet est déjà en cours
+     */
+    useEffect(() => {
+        if (isDeparted && !isRouteStarted) {
+            logWithTag("ROUTE", "Trajet déjà en cours, activation du suivi automatique");
             setIsRouteStarted(true);
             isUserInteractingRef.current = false;
             lastCameraUpdateRef.current = 0;
-
-            getCurrentLocation();
+            // Centrer la carte sur la position actuelle
+            if (mapViewRef.current && currentUserLocation) {
+                setTimeout(() => {
+                    getCurrentLocation();
+                }, 300);
+            }
         }
-    }, [isRouteStarted, getCurrentLocation]);
+    }, [isDeparted, isRouteStarted, currentUserLocation, getCurrentLocation]);
+
+    /**
+     * Ferme automatiquement le modal d'actions si le statut n'est plus SCHEDULED
+     */
+    useEffect(() => {
+        if (!isScheduled && showActionModal) {
+            setShowActionModal(false);
+        }
+    }, [isScheduled, showActionModal]);
+
+    /**
+     * Anime l'effet slide du modal d'actions
+     */
+    useEffect(() => {
+        if (showActionModal) {
+            // Animation d'entrée : slide depuis le bas
+            Animated.spring(actionSlideAnim, {
+                toValue: 1,
+                useNativeDriver: true,
+                tension: 65,
+                friction: 11,
+            }).start();
+        } else {
+            // Animation de sortie : slide vers le bas
+            Animated.timing(actionSlideAnim, {
+                toValue: 0,
+                duration: 250,
+                useNativeDriver: true,
+            }).start();
+        }
+    }, [showActionModal, actionSlideAnim]);
+
+    /**
+     * Anime l'effet slide du modal de confirmation
+     */
+    useEffect(() => {
+        if (showConfirmModal) {
+            // Animation d'entrée : slide depuis le bas
+            Animated.spring(slideAnim, {
+                toValue: 1,
+                useNativeDriver: true,
+                tension: 65,
+                friction: 11,
+            }).start();
+        } else {
+            // Animation de sortie : slide vers le bas
+            Animated.timing(slideAnim, {
+                toValue: 0,
+                duration: 250,
+                useNativeDriver: true,
+            }).start();
+        }
+    }, [showConfirmModal, slideAnim]);
+
+    /**
+     * Gère l'action d'embarquement
+     * Affiche le modal de confirmation avant d'exécuter l'action
+     * L'embarquement n'est possible que si le statut est SCHEDULED
+     */
+    const handleBoarding = useCallback(() => {
+        if (!canPerformBoarding) {
+            return;
+        }
+        logWithTag("ROUTE", "Action d'embarquement sélectionnée");
+        setShowActionModal(false);
+        setPendingAction("boarding");
+        setIsBoardingLoading(false);
+        setShowConfirmModal(true);
+    }, [canPerformBoarding]);
+
+    /**
+     * Confirme et exécute l'action d'embarquement
+     */
+    const confirmBoarding = useCallback(async () => {
+        logWithTag("ROUTE", "Embarquement confirmé");
+        setIsBoardingLoading(true);
+        
+        try {
+            const token = await AsyncStorage.getItem("token");
+            if (!token) {
+                throw new Error("Token non disponible");
+            }
+            if (!departure?.id) {
+                throw new Error("ID du départ non disponible");
+            }
+
+            console.log("[TRACK-ROUTE] ID du départ:", departure?.id);
+            console.log("[TRACK-ROUTE] Token:", token);
+            
+            const response = await markAsStatusDepartureApi(departure?.id, token, "boarding");
+            console.log("[TRACK-ROUTE] Réponse de la mise à jour du statut du départ:", response.data);
+            
+            // Mettre à jour l'état local du départ
+            const updatedDeparture = currentDeparture ? {
+                ...currentDeparture,
+                status: "BOARDING",
+            } : null;
+            
+            if (updatedDeparture) {
+                setCurrentDeparture(updatedDeparture);
+                
+                // Émettre un événement pour notifier les autres écrans
+                departureEventEmitter.emitStatusUpdate({
+                    departureId: departure.id,
+                    newStatus: "BOARDING",
+                    departure: updatedDeparture,
+                });
+            }
+            
+            // Vérifier que la réponse contient les données attendues
+            if (response.data && response.data.trip) {
+                // Afficher un message de succès avec les informations du trajet
+                Alert.alert(
+                    "Succès",
+                    `Le statut du trajet a été mis à jour avec succès.\n\n${response.data.trip}`,
+                    [{ text: "OK" }]
+                );
+            } else {
+                // Afficher un message de succès générique si les données ne sont pas présentes
+                Alert.alert(
+                    "Succès",
+                    "Le statut du trajet a été mis à jour avec succès.",
+                    [{ text: "OK" }]
+                );
+            }
+            
+            // Fermer le modal après succès
+            setShowConfirmModal(false);
+            setPendingAction(null);
+        } catch (error) {
+            logError("[TRACK-ROUTE] Erreur lors de la mise à jour du statut du départ:", error);
+            console.log("[TRACK-ROUTE] Error:", (error as any)?.response?.data?.message);
+            Alert.alert(
+                "Erreur",
+                "Une erreur est survenue lors de la mise à jour du statut. Veuillez réessayer.",
+                [{ text: "OK" }]
+            );
+        } finally {
+            setIsBoardingLoading(false);
+        }
+
+    }, [departure?.id, currentDeparture]);
+
+    /**
+     * Gère le démarrage du trajet depuis le modal
+     * Affiche le modal de confirmation avant d'exécuter l'action
+     * Le démarrage est possible si le statut est SCHEDULED ou BOARDING
+     */
+    const handleStartRouteFromModal = useCallback(() => {
+        if (!canStartRoute) {
+            return;
+        }
+        logWithTag("ROUTE", "Démarrage du trajet depuis le modal");
+        setShowActionModal(false);
+        setPendingAction("startRoute");
+        setIsStartRouteLoading(false);
+        setShowConfirmModal(true);
+    }, [canStartRoute]);
+
+    /**
+     * Confirme et exécute le démarrage du trajet
+     */
+    const confirmStartRoute = useCallback(async () => {
+        logWithTag("ROUTE", "Démarrage du trajet confirmé");
+        setIsStartRouteLoading(true);
+        
+        try {
+            const token = await AsyncStorage.getItem("token");
+            if (!token) {
+                throw new Error("Token non disponible");
+            }
+            if (!departure?.id) {
+                throw new Error("ID du départ non disponible");
+            }
+
+            console.log("[TRACK-ROUTE] ID du départ:", departure?.id);
+            console.log("[TRACK-ROUTE] Token:", token);
+            
+            const response = await markAsStatusDepartureApi(departure?.id, token, "departed");
+            console.log("[TRACK-ROUTE] Réponse de la mise à jour du statut du départ:", response.data);
+            
+            // Mettre à jour l'état local du départ
+            const updatedDeparture = currentDeparture ? {
+                ...currentDeparture,
+                status: "DEPARTED",
+            } : null;
+            
+            if (updatedDeparture) {
+                setCurrentDeparture(updatedDeparture);
+                
+                // Émettre un événement pour notifier les autres écrans
+                departureEventEmitter.emitStatusUpdate({
+                    departureId: departure.id,
+                    newStatus: "DEPARTED",
+                    departure: updatedDeparture,
+                });
+            }
+            
+            // Vérifier que la réponse contient les données attendues
+            if (response.data && response.data.trip) {
+                // Afficher un message de succès avec les informations du trajet
+                Alert.alert(
+                    "Succès",
+                    `Le trajet a été démarré avec succès.\n\n${response.data.trip}`,
+                    [{ text: "OK" }]
+                );
+            } else {
+                // Afficher un message de succès générique si les données ne sont pas présentes
+                Alert.alert(
+                    "Succès",
+                    "Le trajet a été démarré avec succès.",
+                    [{ text: "OK" }]
+                );
+            }
+            
+            // Fermer le modal après succès
+            setShowConfirmModal(false);
+            setPendingAction(null);
+            setIsRouteStarted(true);
+            isUserInteractingRef.current = false;
+            lastCameraUpdateRef.current = 0;
+            getCurrentLocation();
+        } catch (error) {
+            logError("[TRACK-ROUTE] Erreur lors de la mise à jour du statut du départ:", error);
+            console.log("[TRACK-ROUTE] Error:", (error as any)?.response?.data?.message);
+            Alert.alert(
+                "Erreur",
+                "Une erreur est survenue lors du démarrage du trajet. Veuillez réessayer.",
+                [{ text: "OK" }]
+            );
+        } finally {
+            setIsStartRouteLoading(false);
+        }
+    }, [departure?.id, currentDeparture, getCurrentLocation]);
+
+    /**
+     * Gère la fin du trajet pour le statut DEPARTED
+     * Affiche le modal de confirmation avant d'exécuter l'action
+     */
+    const handleFinishRoute = useCallback(() => {
+        if (isArrived || !isDeparted) {
+            return;
+        }
+        logWithTag("ROUTE", "Action de fin de trajet sélectionnée");
+        setPendingAction("finishRoute");
+        setIsFinishLoading(false);
+        setShowConfirmModal(true);
+    }, [isArrived, isDeparted]);
+
+    /**
+     * Confirme et exécute la fin du trajet
+     */
+    const confirmFinishRoute = useCallback(async () => {
+        logWithTag("ROUTE", "Fin de trajet confirmée");
+        setIsFinishLoading(true);
+        
+        try {
+            const token = await AsyncStorage.getItem("token");
+            if (!token) {
+                throw new Error("Token non disponible");
+            }
+            if (!departure?.id) {
+                throw new Error("ID du départ non disponible");
+            }
+
+            console.log("[TRACK-ROUTE] ID du départ:", departure?.id);
+            console.log("[TRACK-ROUTE] Token:", token);
+            
+            const response = await markAsStatusDepartureApi(departure?.id, token, "arrived");
+            console.log("[TRACK-ROUTE] Réponse de la mise à jour du statut du départ:", response.data);
+            
+            // Mettre à jour l'état local du départ
+            const updatedDeparture = currentDeparture ? {
+                ...currentDeparture,
+                status: "ARRIVED",
+            } : null;
+            
+            if (updatedDeparture) {
+                setCurrentDeparture(updatedDeparture);
+                
+                // Émettre un événement pour notifier les autres écrans
+                departureEventEmitter.emitStatusUpdate({
+                    departureId: departure.id,
+                    newStatus: "ARRIVED",
+                    departure: updatedDeparture,
+                });
+            }
+            
+            // Vérifier que la réponse contient les données attendues
+            if (response.data && response.data.trip) {
+                // Afficher un message de succès avec les informations du trajet
+                Alert.alert(
+                    "Succès",
+                    `Le trajet a été marqué comme terminé avec succès.\n\n${response.data.trip}`,
+                    [{ text: "OK", onPress: () => router.back() }]
+                );
+            } else {
+                // Afficher un message de succès générique si les données ne sont pas présentes
+                Alert.alert(
+                    "Succès",
+                    "Le trajet a été marqué comme terminé avec succès.",
+                    [{ text: "OK", onPress: () => router.back() }]
+                );
+            }
+            
+            // Fermer le modal après succès
+            setShowConfirmModal(false);
+            setPendingAction(null);
+        } catch (error) {
+            logError("[TRACK-ROUTE] Erreur lors de la mise à jour du statut du départ:", error);
+            console.log("[TRACK-ROUTE] Error:", (error as any)?.response?.data?.message);
+            Alert.alert(
+                "Erreur",
+                "Une erreur est survenue lors de la mise à jour du statut. Veuillez réessayer.",
+                [{ text: "OK" }]
+            );
+        } finally {
+            setIsFinishLoading(false);
+        }
+    }, [departure?.id, currentDeparture]);
+
+    /**
+     * Gère le démarrage/arrêt du trajet (pour les autres statuts)
+     */
+    const handleStartRoute = useCallback(() => {
+        // Bloquer si le trajet est déjà terminé
+        if (isArrived) {
+            return;
+        }
+
+        if (isRouteStarted) {
+            logWithTag("ROUTE", "Arrêt du trajet");
+            setIsRouteStarted(false);
+            isUserInteractingRef.current = false;
+        } else {
+            // Si le statut est SCHEDULED, afficher le modal pour choisir entre embarquement ou démarrer
+            if (isScheduled) {
+                setShowActionModal(true);
+            } 
+            // Si le statut est BOARDING, on peut démarrer directement le trajet
+            else if (isBoarding) {
+                // Afficher le modal de confirmation pour démarrer
+                setPendingAction("startRoute");
+                setIsStartRouteLoading(false);
+                setShowConfirmModal(true);
+            } 
+            // Si le statut n'est pas DEPARTED, on peut démarrer localement
+            else if (!isDeparted) {
+                logWithTag("ROUTE", "Démarrage du trajet");
+                setIsRouteStarted(true);
+                isUserInteractingRef.current = false;
+                lastCameraUpdateRef.current = 0;
+                getCurrentLocation();
+            }
+        }
+    }, [isRouteStarted, isScheduled, isBoarding, isDeparted, isArrived, getCurrentLocation]);
+
+    /**
+     * Ferme le modal d'actions
+     */
+    const handleCloseActionModal = useCallback(() => {
+        setShowActionModal(false);
+    }, []);
+
+    /**
+     * Annule la confirmation et ferme le modal de confirmation
+     */
+    const handleCancelConfirm = useCallback(() => {
+        if (isBoardingLoading || isStartRouteLoading || isFinishLoading) {
+            return; // Empêcher la fermeture pendant le chargement
+        }
+        setShowConfirmModal(false);
+        setPendingAction(null);
+    }, [isBoardingLoading, isStartRouteLoading, isFinishLoading]);
 
     const primaryTextColor = isDark ? "#FFFFFF" : "#11181C";
 
@@ -652,20 +1174,276 @@ export default function TrackRouteScreen() {
                 </View>
 
                 {/* Bouton démarrer/terminer le trajet */}
-                <View style={styles.floatingButtonContainer}>
+                {!isArrived && (
+                    <View style={styles.floatingButtonContainer}>
+                        {/* Indicateur d'embarquement */}
+                        {isBoarding && !isDeparted && (
+                            <View style={styles.boardingIndicator}>
+                                <MaterialIcons name="directions-bus" size={18} color="#FFFFFF" />
+                                <ThemedText style={styles.boardingIndicatorText}>
+                                    En embarquement
+                                </ThemedText>
+                            </View>
+                        )}
+                        
+                        {isDeparted ? (
+                            <TouchableOpacity
+                                style={[
+                                    styles.floatingButton,
+                                    styles.floatingButtonActive,
+                                ]}
+                                onPress={handleFinishRoute}
+                                activeOpacity={0.8}
+                            >
+                                <ThemedText style={styles.floatingButtonText}>
+                                    Terminer le trajet
+                                </ThemedText>
+                            </TouchableOpacity>
+                        ) : isBoarding ? (
+                            <TouchableOpacity
+                                style={[
+                                    styles.floatingButton,
+                                    isRouteStarted && styles.floatingButtonActive,
+                                ]}
+                                onPress={handleStartRoute}
+                                activeOpacity={0.8}
+                            >
+                                <ThemedText style={styles.floatingButtonText}>
+                                    {isRouteStarted
+                                        ? "Terminer le trajet"
+                                        : "Démarrer le trajet"}
+                                </ThemedText>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={[
+                                    styles.floatingButton,
+                                    isRouteStarted && styles.floatingButtonActive,
+                                    !canStartRoute && { opacity: 0.6 },
+                                ]}
+                                onPress={handleStartRoute}
+                                activeOpacity={0.8}
+                                disabled={!canStartRoute}
+                            >
+                                <ThemedText style={styles.floatingButtonText}>
+                                    {isRouteStarted
+                                        ? "Terminer le trajet"
+                                        : isScheduled
+                                        ? "Choisir une action"
+                                        : "Démarrer le trajet"}
+                                </ThemedText>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                )}
+                {isArrived && (
+                    <View style={styles.floatingButtonContainer}>
+                        <View
+                            style={[
+                                styles.floatingButton,
+                                { backgroundColor: "#34C759", opacity: 0.7 },
+                            ]}
+                        >
+                            <ThemedText style={styles.floatingButtonText}>
+                                Trajet terminé
+                            </ThemedText>
+                        </View>
+                    </View>
+                )}
+
+                {/* Bottom Sheet d'actions pour le statut SCHEDULED */}
+                <Modal
+                    visible={showActionModal && isScheduled}
+                    transparent
+                    animationType="none"
+                    onRequestClose={handleCloseActionModal}
+                >
                     <TouchableOpacity
-                        style={[
-                            styles.floatingButton,
-                            isRouteStarted && styles.floatingButtonActive,
-                        ]}
-                        onPress={handleStartRoute}
-                        activeOpacity={0.8}
+                        style={styles.bottomSheetOverlay}
+                        activeOpacity={1}
+                        onPress={handleCloseActionModal}
                     >
-                        <ThemedText style={styles.floatingButtonText}>
-                            {isRouteStarted ? "Terminer le trajet" : "Démarrer le trajet"}
-                        </ThemedText>
+                        <Animated.View
+                            style={[
+                                styles.bottomSheetContent,
+                                { backgroundColor: isDark ? "#1A1A1A" : "#FFFFFF" },
+                                {
+                                    transform: [
+                                        {
+                                            translateY: actionSlideAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [500, 0],
+                                            }),
+                                        },
+                                    ],
+                                    opacity: actionSlideAnim,
+                                },
+                            ]}
+                            onStartShouldSetResponder={() => true}
+                        >
+                            {/* Handle */}
+                            <View style={styles.bottomSheetHandle} />
+
+                            <ThemedText style={[styles.bottomSheetTitle, { color: isDark ? "#FFFFFF" : "#11181C" }]}>
+                                Choisir une action
+                            </ThemedText>
+
+                            {/* Option d'embarquement - seulement si SCHEDULED */}
+                            {canPerformBoarding && (
+                                <TouchableOpacity
+                                    style={[
+                                        styles.bottomSheetButton,
+                                        { backgroundColor: "#1776BA" },
+                                    ]}
+                                    onPress={handleBoarding}
+                                    activeOpacity={0.8}
+                                >
+                                    <MaterialIcons name="directions-bus" size={24} color="#FFFFFF" />
+                                    <ThemedText style={styles.bottomSheetButtonText}>
+                                        Embarquement
+                                    </ThemedText>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* Option de démarrage - si SCHEDULED ou BOARDING */}
+                            {canStartRoute && (
+                                <TouchableOpacity
+                                    style={[
+                                        styles.bottomSheetButton,
+                                        { backgroundColor: "#43b860" },
+                                    ]}
+                                    onPress={handleStartRouteFromModal}
+                                    activeOpacity={0.8}
+                                >
+                                    <MaterialIcons name="play-arrow" size={24} color="#FFFFFF" />
+                                    <ThemedText style={styles.bottomSheetButtonText}>
+                                        Démarrer le trajet
+                                    </ThemedText>
+                                </TouchableOpacity>
+                            )}
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.bottomSheetCloseButton,
+                                    { backgroundColor: isDark ? "#2C2C2E" : "#F8F8F8" },
+                                ]}
+                                onPress={handleCloseActionModal}
+                                activeOpacity={0.8}
+                            >
+                                <ThemedText style={[styles.bottomSheetCloseText, { color: isDark ? "#FFFFFF" : "#11181C" }]}>
+                                    Fermer
+                                </ThemedText>
+                            </TouchableOpacity>
+                        </Animated.View>
                     </TouchableOpacity>
-                </View>
+                </Modal>
+
+                {/* Bottom Sheet de confirmation pour les actions */}
+                <Modal
+                    visible={showConfirmModal}
+                    transparent
+                    animationType="none"
+                    onRequestClose={isBoardingLoading || isStartRouteLoading || isFinishLoading ? undefined : handleCancelConfirm}
+                >
+                    <TouchableOpacity
+                        style={styles.bottomSheetOverlay}
+                        activeOpacity={1}
+                        onPress={isBoardingLoading || isStartRouteLoading || isFinishLoading ? undefined : handleCancelConfirm}
+                        disabled={isBoardingLoading || isStartRouteLoading || isFinishLoading}
+                    >
+                        <Animated.View
+                            style={[
+                                styles.bottomSheetContent,
+                                { backgroundColor: isDark ? "#1A1A1A" : "#FFFFFF" },
+                                {
+                                    transform: [
+                                        {
+                                            translateY: slideAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [500, 0],
+                                            }),
+                                        },
+                                    ],
+                                    opacity: slideAnim,
+                                },
+                            ]}
+                            onStartShouldSetResponder={() => true}
+                        >
+                            {/* Handle */}
+                            <View style={styles.bottomSheetHandle} />
+
+                            <ThemedText style={[styles.bottomSheetTitle, { color: isDark ? "#FFFFFF" : "#11181C" }]}>
+                                Confirmer l'action
+                            </ThemedText>
+
+                            <ThemedText style={[styles.bottomSheetMessage, { color: isDark ? "#CCCCCC" : "#666666" }]}>
+                                {pendingAction === "boarding"
+                                    ? "Êtes-vous sûr de vouloir démarrer l'embarquement ?"
+                                    : pendingAction === "finishRoute"
+                                    ? "Êtes-vous sûr de vouloir terminer le trajet ?"
+                                    : "Êtes-vous sûr de vouloir démarrer le trajet ?"}
+                            </ThemedText>
+
+                            <View style={styles.confirmButtonsContainer}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.bottomSheetConfirmButton,
+                                        {
+                                            backgroundColor:
+                                                pendingAction === "boarding" 
+                                                    ? "#1776BA" 
+                                                    : pendingAction === "finishRoute"
+                                                    ? "#E74C3C"
+                                                    : "#43b860",
+                                            opacity: (isBoardingLoading || isStartRouteLoading || isFinishLoading) ? 0.6 : 1,
+                                        },
+                                    ]}
+                                    onPress={
+                                        pendingAction === "boarding"
+                                            ? confirmBoarding
+                                            : pendingAction === "finishRoute"
+                                            ? confirmFinishRoute
+                                            : confirmStartRoute
+                                    }
+                                    activeOpacity={0.8}
+                                    disabled={isBoardingLoading || isStartRouteLoading || isFinishLoading}
+                                >
+                                    {(isBoardingLoading && pendingAction === "boarding") || 
+                                     (isStartRouteLoading && pendingAction === "startRoute") ||
+                                     (isFinishLoading && pendingAction === "finishRoute") ? (
+                                        <View style={styles.loaderContainer}>
+                                            <ActivityIndicator size="small" color="#FFFFFF" />
+                                            <ThemedText style={[styles.bottomSheetConfirmButtonText, { marginLeft: 8 }]}>
+                                                Traitement...
+                                            </ThemedText>
+                                        </View>
+                                    ) : (
+                                        <ThemedText style={styles.bottomSheetConfirmButtonText}>
+                                            Confirmer
+                                        </ThemedText>
+                                    )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.bottomSheetCloseButton,
+                                        { 
+                                            backgroundColor: isDark ? "#2C2C2E" : "#F8F8F8",
+                                            opacity: (isBoardingLoading || isStartRouteLoading || isFinishLoading) ? 0.6 : 1,
+                                        },
+                                    ]}
+                                    onPress={handleCancelConfirm}
+                                    activeOpacity={0.8}
+                                    disabled={isBoardingLoading || isStartRouteLoading || isFinishLoading}
+                                >
+                                    <ThemedText style={[styles.bottomSheetCloseText, { color: isDark ? "#FFFFFF" : "#11181C" }]}>
+                                        Annuler
+                                    </ThemedText>
+                                </TouchableOpacity>
+                            </View>
+                        </Animated.View>
+                    </TouchableOpacity>
+                </Modal>
             </View>
         </View>
     );
@@ -787,5 +1565,117 @@ const styles = StyleSheet.create({
         color: "#FFFFFF",
         fontSize: 16,
         fontFamily: "Ubuntu_Bold",
+    },
+    boardingIndicator: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#5856D6",
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 20,
+        marginBottom: 12,
+        gap: 8,
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    boardingIndicatorText: {
+        color: "#FFFFFF",
+        fontSize: 14,
+        fontFamily: "Ubuntu_Medium",
+    },
+    bottomSheetOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        justifyContent: "flex-end",
+    },
+    bottomSheetContent: {
+        width: "100%",
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        paddingTop: 12,
+        paddingBottom: 34,
+        paddingHorizontal: 24,
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: -4,
+        },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 10,
+    },
+    bottomSheetHandle: {
+        width: 40,
+        height: 4,
+        backgroundColor: "#C7C7CC",
+        borderRadius: 2,
+        alignSelf: "center",
+        marginBottom: 24,
+    },
+    bottomSheetTitle: {
+        fontSize: 20,
+        fontFamily: "Ubuntu_Bold",
+        marginBottom: 16,
+        textAlign: "center",
+    },
+    bottomSheetMessage: {
+        fontSize: 16,
+        fontFamily: "Ubuntu_Regular",
+        marginBottom: 24,
+        textAlign: "center",
+        lineHeight: 22,
+    },
+    bottomSheetButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        marginBottom: 12,
+        gap: 12,
+    },
+    bottomSheetButtonText: {
+        color: "#FFFFFF",
+        fontSize: 16,
+        fontFamily: "Ubuntu_Medium",
+    },
+    bottomSheetCloseButton: {
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        marginTop: 8,
+        alignItems: "center",
+    },
+    bottomSheetCloseText: {
+        fontSize: 16,
+        fontFamily: "Ubuntu_Medium",
+    },
+    confirmButtonsContainer: {
+        gap: 12,
+    },
+    bottomSheetConfirmButton: {
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    bottomSheetConfirmButtonText: {
+        color: "#FFFFFF",
+        fontSize: 16,
+        fontFamily: "Ubuntu_Medium",
+    },
+    loaderContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
     },
 });

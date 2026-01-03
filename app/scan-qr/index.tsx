@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MaterialIcons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SCAN_AREA_SIZE = 280;
@@ -457,6 +458,7 @@ const ScanQRScreen = () => {
         ]);
 
         // Vérification API
+        console.log('data dans le handleBarCodeScanned: ', data);
         const validationData = await verifyQRCodeApi(data);
 
         if (!validationData) {
@@ -558,7 +560,7 @@ const ScanQRScreen = () => {
                         style={[styles.closeButton, { top: insets.top + 16 }]}
                         onPress={() => router.back()}
                     >
-                        <MaterialCommunityIcons name="close" size={28} color="#FFF" />
+                        <MaterialIcons name="arrow-back" size={24} color="#FFF" />
                     </Pressable>
 
                     {/* Bouton torche */}
@@ -689,9 +691,9 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 20,
         zIndex: 10,
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         backgroundColor: 'rgba(0,0,0,0.7)',
         justifyContent: 'center',
         alignItems: 'center',

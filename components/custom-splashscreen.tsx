@@ -3,9 +3,9 @@ import { Dimensions, Image, StyleSheet, Text, View } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
-const CustomSplashScreen = () => {
+const CustomSplashScreen = ({ onLayout }: { onLayout?: () => void }) => {
     return (
-        <View style={styles.splashContainer}>
+        <View style={styles.splashContainer} onLayout={onLayout}>
             <Text style={
                 { 
                     fontSize: 50, 

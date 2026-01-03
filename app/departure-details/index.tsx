@@ -1,12 +1,12 @@
-import { baseUrl } from '@/api/config';
+import { processScanApi } from '@/api/departures';
 import { Departure } from '@/components/departure-card';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { departureEventEmitter } from '@/utils/departure-events';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -53,15 +53,51 @@ export default function DepartureDetailsScreen() {
     const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{ departure: string }>();
 
-    // Parse les données du départ depuis les paramètres
-    let departure: Departure | null = null;
-    try {
-        if (params.departure) {
-            departure = JSON.parse(params.departure) as Departure;
+    // Parse les données du départ initiales depuis les paramètres
+    const initialDeparture = useMemo<Departure | null>(() => {
+        try {
+            if (params.departure) {
+                return JSON.parse(params.departure) as Departure;
+            }
+        } catch (error) {
+            console.error('Erreur lors du parsing des données du départ:', error);
         }
-    } catch (error) {
-        console.error('Erreur lors du parsing des données du départ:', error);
-    }
+        return null;
+    }, [params.departure]);
+
+    // État local pour le départ (mis à jour via les événements)
+    const [departure, setDeparture] = useState<Departure | null>(initialDeparture);
+
+    // Mettre à jour l'état local quand le départ initial change
+    useEffect(() => {
+        setDeparture(initialDeparture);
+    }, [initialDeparture]);
+
+    // Écouter les événements de mise à jour de statut
+    useEffect(() => {
+        if (!departure?.id) return;
+
+        const unsubscribe = departureEventEmitter.onStatusUpdate((event) => {
+            // Mettre à jour si c'est le même départ
+            if (event.departureId === departure.id) {
+                if (event.departure) {
+                    // Utiliser les données complètes si disponibles
+                    setDeparture(event.departure);
+                } else {
+                    // Sinon, mettre à jour uniquement le statut
+                    setDeparture((prev) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            status: event.newStatus,
+                        };
+                    });
+                }
+            }
+        });
+
+        return unsubscribe;
+    }, [departure?.id]);
 
     // Si aucune donnée n'est disponible, retourner à l'écran précédent
     if (!departure) {
@@ -82,9 +118,26 @@ export default function DepartureDetailsScreen() {
     const companyColor = getCompanyColor(departure.company);
     const companyInitials = getCompanyInitials(departure.company);
 
+    // TCK-1767027042482
+
     const [showSearchModal, setShowSearchModal] = useState(false);
     const [ticketReference, setTicketReference] = useState('');
     const [isSearching, setIsSearching] = useState(false);
+
+    /**
+     * Nettoie les données d'authentification stockées
+     */
+    const clearAuthData = useCallback(async () => {
+        await AsyncStorage.multiRemove([
+            'token',
+            'refresh_token',
+            'expires_at',
+            'token_type',
+            'user_id',
+            'user_role',
+            'company_id',
+        ]);
+    }, []);
 
     /**
      * Gère le retour à l'écran précédent
@@ -131,7 +184,7 @@ export default function DepartureDetailsScreen() {
                         onPress: async () => {
                             // Stocke l'information que l'alerte a été affichée pour ce trajet
                             await AsyncStorage.setItem(trajectoryAlertKey, 'true');
-                            
+
                             // Redirige vers l'écran de suivi de trajet avec les données du départ
                             router.push({
                                 pathname: '/track-route',
@@ -177,7 +230,6 @@ export default function DepartureDetailsScreen() {
     */
     const handleOptions = () => {
         // TODO: Implémenter le menu d'options
-        console.log('Options pour le départ:', departure?.id);
     };
 
     /**
@@ -226,39 +278,43 @@ export default function DepartureDetailsScreen() {
         setIsSearching(true);
         try {
             const token = await AsyncStorage.getItem('token');
-            if (!token) {
+            const companyId = await AsyncStorage.getItem('company_id');
+            if (!token || !companyId) {
                 Alert.alert('Erreur', 'Session expirée. Veuillez vous reconnecter.');
+                await clearAuthData();
+                router.replace('/login');
                 return;
             }
 
-            // Appel API pour rechercher la réservation par code
-            const response = await axios.get(`${baseUrl}/bookings/${ticketReference.trim()}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
+            let departure: any = null;
+            try {
+                if (params.departure) {
+                    departure = JSON.parse(params.departure);
+                }
+            } catch (error) {
+                console.error('[PROCESS] Erreur lors du parsing du départ:', error);
+            }
+
+            // Récupération de l'ID du départ depuis la réponse
+            const departureId = departure?.id;
+
+            const qrCodeData = {
+                t: "b",
+                c: ticketReference.trim(),
+                cid: companyId,
+                did: departureId
+            }
+
+            const response = await processScanApi(qrCodeData, token);
+            router.push({
+                pathname: '/scan-result',
+                params: {
+                    bookingData: JSON.stringify(response.data),
                 },
             });
 
-            if (response?.data) {
-                // Formatage des données pour correspondre au format attendu par scan-result
-                const bookingData = {
-                    booking: response.data,
-                };
-
-                // Fermer le modal et rediriger vers l'écran de résultat
-                setShowSearchModal(false);
-                setTicketReference('');
-
-                router.push({
-                    pathname: '/scan-result',
-                    params: {
-                        bookingData: JSON.stringify(bookingData),
-                    },
-                });
-            } else {
-                Alert.alert('Erreur', 'Aucune réservation trouvée avec cette référence.');
-            }
         } catch (error: any) {
-            console.error('Erreur lors de la recherche par référence:', error);
+            console.error('Erreur lors de la recherche par référence : ', error.response?.data);
             Alert.alert(
                 'Erreur',
                 error.response?.data?.message || 'Impossible de trouver la réservation. Vérifiez la référence saisie.'
@@ -360,6 +416,24 @@ export default function DepartureDetailsScreen() {
         return colorMapping
             ? (isDark ? colorMapping.dark : colorMapping.light)
             : (isDark ? '#98989D' : '#8E8E93');
+    };
+
+    /**
+     * Affiche la liste des réservations pour un départ
+     * @param departure - Les données du départ
+     */
+    const handleShowListReservations = async (departure: Departure) => {
+        if (!departure?.id) {
+            Alert.alert('Erreur', 'ID du départ manquant.');
+            return;
+        }
+
+        router.push({
+            pathname: '/bookings',
+            params: {
+                departureId: departure.id,
+            },
+        });
     };
 
     return (
@@ -615,8 +689,18 @@ export default function DepartureDetailsScreen() {
                                 <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
                                     La liste des réservations
                                 </ThemedText>
-                                <Pressable style={{ backgroundColor: buttonBackgroundColor, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 }} onPress={() => console.log('Voir la liste des réservations')}>
-                                    <ThemedText style={[styles.detailValue, { color: "#FFFFFF", fontSize: 13 }]}>
+                                <Pressable
+                                    disabled={departure.seatsBooked === 0}
+                                    style={{
+                                        backgroundColor: departure.seatsBooked === 0 ? (isDark ? '#3A3A3C' : '#CCCCCC') : buttonBackgroundColor,
+                                        paddingHorizontal: 10,
+                                        paddingVertical: 5,
+                                        borderRadius: 10,
+                                        opacity: departure.seatsBooked === 0 ? 0.5 : 1
+                                    }}
+                                    onPress={() => handleShowListReservations(departure)}
+                                >
+                                    <ThemedText style={[styles.detailValue, { color: departure.seatsBooked === 0 ? (isDark ? '#666666' : '#999999') : "#FFFFFF", fontSize: 13 }]}>
                                         Voir la liste
                                     </ThemedText>
                                 </Pressable>
@@ -627,26 +711,33 @@ export default function DepartureDetailsScreen() {
             </ScrollView>
 
             {/* Boutons d'action - affichés uniquement si le statut est SCHEDULED */}
-            {departure.status?.toUpperCase() === 'SCHEDULED' && (
-                <View style={[styles.buttonContainer, { paddingBottom: insets.bottom + 16 }]}>
-                    <View style={styles.buttonsRow}>
-                        <TouchableOpacity
-                            style={[styles.scanButton, { backgroundColor: isDark ? '#2A2A2A' : '#FFFFFF', borderColor: borderColor }]}
-                            onPress={handleScanQR}
-                        >
-                            <MaterialIcons name="check-circle" size={24} color={primaryTextColor} />
-                            <ThemedText style={[styles.scanButtonText, { color: primaryTextColor }]}>Validation</ThemedText>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.downloadButton, { backgroundColor: "#1776BA" }]}
-                            onPress={handleStartTraject}
-                        >
-                            <MaterialIcons name="directions-bus-filled" size={24} color="#FFFFFF" />
-                            <ThemedText style={[styles.downloadButtonText, {  }]}>Démarrer</ThemedText>
-                        </TouchableOpacity>
+            {
+                (
+                    departure.status?.toUpperCase() === 'SCHEDULED' ||
+                    departure.status?.toUpperCase() === 'BOARDING' ||
+                    departure.status?.toUpperCase() === 'DEPARTED' ||
+                    departure.status?.includes('Retard')
+                )
+                && (
+                    <View style={[styles.buttonContainer, { paddingBottom: insets.bottom + 16 }]}>
+                        <View style={styles.buttonsRow}>
+                            <TouchableOpacity
+                                style={[styles.scanButton, { backgroundColor: isDark ? '#2A2A2A' : '#FFFFFF', borderColor: borderColor }]}
+                                onPress={handleScanQR}
+                            >
+                                <MaterialIcons name="check-circle" size={24} color={primaryTextColor} />
+                                <ThemedText style={[styles.scanButtonText, { color: primaryTextColor }]}>Validation</ThemedText>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.downloadButton, { backgroundColor: "#1776BA" }]}
+                                onPress={handleStartTraject}
+                            >
+                                <MaterialIcons name="directions-bus-filled" size={24} color="#FFFFFF" />
+                                <ThemedText style={[styles.downloadButtonText, {}]}>Démarrer</ThemedText>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                </View>
-            )}
+                )}
 
             {/* Modal de recherche par référence */}
             <Modal
@@ -663,7 +754,6 @@ export default function DepartureDetailsScreen() {
                     <Pressable
                         style={styles.modalOverlay}
                         onPress={handleCloseSearchModal}
-                        activeOpacity={1}
                     >
                         <Pressable
                             style={styles.modalContentWrapper}
@@ -695,27 +785,46 @@ export default function DepartureDetailsScreen() {
                                         <ThemedText style={[styles.modalLabel, { color: labelTextColor }]}>
                                             Référence du ticket
                                         </ThemedText>
-                                        <TextInput
-                                            style={[
-                                                styles.modalInput,
-                                                {
-                                                    backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5',
-                                                    borderColor: borderColor,
-                                                    color: primaryTextColor,
-                                                },
-                                            ]}
-                                            placeholder="Entrez la référence du ticket"
-                                            placeholderTextColor={secondaryTextColor}
-                                            value={ticketReference}
-                                            onChangeText={setTicketReference}
-                                            autoCapitalize="characters"
-                                            autoCorrect={false}
-                                            editable={!isSearching}
-                                            returnKeyType="search"
-                                            onSubmitEditing={handleSearchByReference}
-                                        />
+                                        <View style={styles.inputContainer}>
+                                            <TextInput
+                                                style={[
+                                                    styles.modalInput,
+                                                    {
+                                                        backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5',
+                                                        borderColor: borderColor,
+                                                        color: primaryTextColor,
+                                                        paddingRight: ticketReference ? 45 : 16,
+                                                    },
+                                                ]}
+                                                placeholder="Entrez la référence du ticket"
+                                                placeholderTextColor={secondaryTextColor}
+                                                value={ticketReference}
+                                                onChangeText={setTicketReference}
+                                                autoCapitalize="characters"
+                                                autoCorrect={false}
+                                                editable={!isSearching}
+                                                returnKeyType="search"
+                                                onSubmitEditing={handleSearchByReference}
+                                            />
+                                            {ticketReference.length > 0 && (
+                                                <TouchableOpacity
+                                                    style={[styles.clearButton, 
+                                                        { 
+                                                            backgroundColor: isDark ? '#3A3A3C' : '#CCCCCC', 
+                                                            width: 25, height: 25, borderRadius: 100, 
+                                                            borderWidth: 1, borderColor: borderColor,
+                                                            justifyContent: 'center', alignItems: 'center',
+                                                            top: '45%',
+                                                        }]}
+                                                    onPress={() => setTicketReference('')}
+                                                    disabled={isSearching}
+                                                >
+                                                    <MaterialIcons name="close" size={14} color={secondaryTextColor} />
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
                                         <ThemedText style={[styles.modalHint, { color: secondaryTextColor }]}>
-                                            Saisissez le code de référence du ticket (ex: ABC123)
+                                            Saisissez le code de référence du ticket (ex: TCK-123456)
                                         </ThemedText>
                                     </View>
                                 </ScrollView>
@@ -1259,6 +1368,10 @@ const styles = StyleSheet.create({
         fontFamily: 'Ubuntu_Medium',
         marginBottom: 8,
     },
+    inputContainer: {
+        position: 'relative',
+        marginBottom: 8,
+    },
     modalInput: {
         borderWidth: 1,
         borderRadius: 12,
@@ -1266,7 +1379,16 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         fontSize: 16,
         fontFamily: 'Ubuntu_Regular',
-        marginBottom: 8,
+    },
+    clearButton: {
+        position: 'absolute',
+        right: 12,
+        top: '50%',
+        transform: [{ translateY: -10 }],
+        width: 20,
+        height: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     modalHint: {
         fontSize: 12,

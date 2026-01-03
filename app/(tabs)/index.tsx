@@ -4,11 +4,15 @@ import { Departure, DepartureCard } from '@/components/departure-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useDimensions } from '@/hooks/use-dimensions';
+import { formatDateForApi, getDateRange } from '@/utils/date';
+import { departureEventEmitter } from '@/utils/departure-events';
+import { logError } from '@/utils/logger';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -67,72 +71,6 @@ interface PaginatedResponse {
  */
 type DateFilterType = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom';
 
-/**
- * Calcule les dates de début et de fin selon le type de filtre
- */
-const getDateRange = (filterType: DateFilterType, customDateFrom?: Date, customDateTo?: Date): { dateFrom: Date | null; dateTo: Date | null } => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (filterType) {
-        case 'today':
-            // Pour aujourd'hui, on met la même date dans les deux paramètres
-            return {
-                dateFrom: today,
-                dateTo: today,
-            };
-
-        case 'thisWeek':
-            const dayOfWeek = now.getDay();
-            const startOfWeek = new Date(today);
-            startOfWeek.setDate(today.getDate() - dayOfWeek);
-            const endOfWeek = new Date(startOfWeek);
-            endOfWeek.setDate(startOfWeek.getDate() + 6);
-            return {
-                dateFrom: startOfWeek,
-                dateTo: endOfWeek,
-            };
-
-        case 'thisMonth':
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            return {
-                dateFrom: startOfMonth,
-                dateTo: endOfMonth,
-            };
-
-        case 'thisYear':
-            const startOfYear = new Date(now.getFullYear(), 0, 1);
-            const endOfYear = new Date(now.getFullYear(), 11, 31);
-            return {
-                dateFrom: startOfYear,
-                dateTo: endOfYear,
-            };
-
-        case 'custom':
-            if (customDateFrom && customDateTo) {
-                const from = new Date(customDateFrom);
-                from.setHours(0, 0, 0, 0);
-                const to = new Date(customDateTo);
-                to.setHours(23, 59, 59, 999);
-                return {
-                    dateFrom: from,
-                    dateTo: to,
-                };
-            }
-            return { dateFrom: null, dateTo: null };
-
-        default:
-            return { dateFrom: null, dateTo: null };
-    }
-};
-
-/**
- * Formate une date pour l'API (format ISO)
- */
-const formatDateForApi = (date: Date): string => {
-    return date.toISOString().split('T')[0];
-};
 
 /**
  * Extrait un code de station (3 lettres) depuis un nom de station
@@ -287,6 +225,7 @@ export default function HomeScreen() {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
+    const dimensions = useDimensions();
 
     const [departures, setDepartures] = useState<Departure[]>([]);
     const [loading, setLoading] = useState(true);
@@ -310,6 +249,8 @@ export default function HomeScreen() {
     const [showFilterModal, setShowFilterModal] = useState(false);
     // État pour suivre si les dates custom sont complètes
     const [customDatesReady, setCustomDatesReady] = useState(false);
+    // État pour stocker la hauteur du header mesurée
+    const [headerHeight, setHeaderHeight] = useState(0);
 
     /**
      * Nettoie les données d'authentification stockées
@@ -322,6 +263,7 @@ export default function HomeScreen() {
             'expires_in',
             'token_type',
             'user_id',
+            'company_id',
         ]);
     }, []);
 
@@ -334,14 +276,15 @@ export default function HomeScreen() {
     const checkUserSession = useCallback(async (): Promise<boolean> => {
         try {
             setIsCheckingSession(true);
-            const [token, expiresAt, refreshToken] = await Promise.all([
+            const [token, expiresAt, refreshToken, user_role] = await Promise.all([
                 AsyncStorage.getItem('token'),
                 AsyncStorage.getItem('expires_at'),
                 AsyncStorage.getItem('refresh_token'),
+                AsyncStorage.getItem('user_role'),
             ]);
 
             // Si aucun token n'existe, rediriger vers l'écran de connexion
-            if (!token || !refreshToken) {
+            if (!token || !refreshToken || !user_role) {
                 await clearAuthData();
                 router.replace('/login');
                 return false;
@@ -359,10 +302,14 @@ export default function HomeScreen() {
                     const response = await refreshTokenApi(refreshToken);
 
                     if (response.status === 200 && response.data?.access_token) {
+                        // Calculer le timestamp d'expiration en ajoutant expires_in (en secondes) à la date actuelle
+                        const expiresInSeconds = response.data.expires_in || 3600; // Par défaut 1 heure si non fourni
+                        const expiresAtTimestamp = Math.floor(Date.now() / 1000) + expiresInSeconds;
+                        
                         // Sauvegarder les nouveaux tokens
                         await Promise.all([
                             AsyncStorage.setItem('token', response.data.access_token),
-                            AsyncStorage.setItem('expires_at', String(response.data.expires_in)),
+                            AsyncStorage.setItem('expires_at', String(expiresAtTimestamp)),
                             AsyncStorage.setItem('token_type', response.data.token_type),
                         ]);
 
@@ -415,8 +362,9 @@ export default function HomeScreen() {
 
             const token = await AsyncStorage.getItem('token');
             const userId = await AsyncStorage.getItem('user_id');
+            const userRole = await AsyncStorage.getItem('user_role');
 
-            if (!token || !userId) {
+            if (!token || !userId || !userRole) {
                 setError('Vous devez être connecté pour voir vos trajets');
                 setLoading(false);
                 setRefreshing(false);
@@ -426,8 +374,13 @@ export default function HomeScreen() {
                 return;
             }
 
+            // Si userRole = driver, alors roleId = driverId
+            // Si userRole = supervisor, alors roleId = supervisorId
+            // Etc...
+            const roleId = `${userRole}Id`;
+
             // Construire les paramètres de requête
-            let queryParams = `driverId=${userId}&pageSize=${pageSize}&page=${page}`;
+            let queryParams = `${roleId}=${userId}&pageSize=${pageSize}&page=${page}`;
 
             // Ajouter les paramètres de date si un filtre est sélectionné
             if (dateFilter !== 'all') {
@@ -446,7 +399,6 @@ export default function HomeScreen() {
             const data: PaginatedResponse = response.data;
 
             if (data?.items && Array.isArray(data.items)) {
-                console.log('data.items departures ==>, ', data.items);
 
                 const transformedDepartures = data.items.map(transformApiDepartureToDeparture);
 
@@ -478,7 +430,7 @@ export default function HomeScreen() {
                 setHasMore(false);
             }
         } catch (err: any) {
-            console.error('Erreur lors du chargement des trajets:', err);
+            logError('Erreur lors du chargement des trajets:', err);
             setError('Impossible de charger les trajets. Veuillez réessayer.');
             if (err.response?.status === 401) {
                 // Session expirée, nettoyer et rediriger vers login
@@ -548,6 +500,41 @@ export default function HomeScreen() {
         setHasMore(true);
         loadDepartures(1, false);
     }, [loadDepartures, dateFilter, customDatesReady, isSessionValid, isCheckingSession]);
+
+    /**
+     * Écoute les événements de mise à jour de statut des départs
+     * Met à jour la liste locale quand un départ est modifié
+     */
+    useEffect(() => {
+        const unsubscribe = departureEventEmitter.onStatusUpdate((event) => {
+            // Mettre à jour le départ dans la liste si présent
+            setDepartures((prevDepartures) => {
+                const departureIndex = prevDepartures.findIndex((d) => d.id === event.departureId);
+                
+                if (departureIndex !== -1) {
+                    // Créer une nouvelle liste avec le départ mis à jour
+                    const updatedDepartures = [...prevDepartures];
+                    
+                    if (event.departure) {
+                        // Utiliser les données complètes si disponibles
+                        updatedDepartures[departureIndex] = event.departure;
+                    } else {
+                        // Sinon, mettre à jour uniquement le statut
+                        updatedDepartures[departureIndex] = {
+                            ...updatedDepartures[departureIndex],
+                            status: event.newStatus,
+                        };
+                    }
+                    
+                    return updatedDepartures;
+                }
+                
+                return prevDepartures;
+            });
+        });
+
+        return unsubscribe;
+    }, []);
 
     /**
      * Gère le changement de filtre de date
@@ -672,13 +659,21 @@ export default function HomeScreen() {
     /**
      * Rend un élément de la liste
      */
-    const renderItem = ({ item }: { item: Departure }) => (
-        <DepartureCard
-            departure={item}
-            onTicketPress={() => handleTicketPress(item.id)}
-            onMapPress={() => handleMapPress(item.id)}
-        />
+    const renderItem = useCallback(
+        ({ item }: { item: Departure }) => (
+            <DepartureCard
+                departure={item}
+                onTicketPress={() => handleTicketPress(item.id)}
+                onMapPress={() => handleMapPress(item.id)}
+            />
+        ),
+        []
     );
+
+    /**
+     * Extrait la clé unique pour chaque élément de la liste
+     */
+    const keyExtractor = useCallback((item: Departure) => item.id, []);
 
     /**
      * Rend le footer avec l'indicateur de chargement
@@ -694,16 +689,19 @@ export default function HomeScreen() {
     };
 
     /**
-     * Rend le contenu vide ou l'état de chargement
+     * Rend le contenu vide, l'état de chargement ou l'état d'erreur
      */
     const renderEmpty = () => {
-        if (loading || refreshing) {
+        // Afficher le loader uniquement si on charge et qu'on n'est pas en train de vérifier la session
+        // (le chargement pendant la vérification de session est géré par le return early)
+        if ((loading || refreshing) && !isCheckingSession) {
+            // Calculer la hauteur disponible (hauteur de l'écran - header mesuré)
+            const availableHeight = headerHeight > 0 ? dimensions.height - headerHeight : dimensions.height * 0.7;
+            
             return (
-                <View style={[styles.container, { backgroundColor }]}>
-                    <View style={styles.loadingContainer}>
-                        {/* <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} /> */}
-                        <ThemedText style={styles.loadingText}>Chargement des trajets...</ThemedText>
-                    </View>
+                <View style={[styles.loadingContainer, { height: availableHeight }]}>
+                    <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
+                    <ThemedText style={styles.loadingText}>Chargement de vos trajets...</ThemedText>
                 </View>
             );
         }
@@ -724,18 +722,24 @@ export default function HomeScreen() {
     };
 
     /**
-     * Rend le modal de sélection de filtre
+     * Options de filtre mémorisées
      */
-    const renderFilterModal = () => {
-        const filterOptions: { type: DateFilterType; label: string }[] = [
+    const filterOptions = useMemo<{ type: DateFilterType; label: string }[]>(
+        () => [
             { type: 'all', label: 'Tous les trajets' },
             { type: 'today', label: "Aujourd'hui" },
             { type: 'thisWeek', label: 'Cette semaine' },
             { type: 'thisMonth', label: 'Ce mois' },
             { type: 'thisYear', label: 'Cette année' },
             { type: 'custom', label: 'Date spécifique' },
-        ];
+        ],
+        []
+    );
 
+    /**
+     * Rend le modal de sélection de filtre
+     */
+    const renderFilterModal = useCallback(() => {
         return (
             <Modal
                 visible={showFilterModal}
@@ -798,22 +802,12 @@ export default function HomeScreen() {
                 </View>
             </Modal>
         );
-    };
+    }, [showFilterModal, isDark, filterOptions, dateFilter, handleDateFilterChange, handleResetFilter]);
 
     const backgroundColor = isDark ? '#000000' : '#F3F3F7';
     const headerBackgroundColor = isDark ? '#000000' : '#F3F3F7';
 
-    // Afficher un loader pendant la vérification de la session
-    if (isCheckingSession) {
-        return (
-            <View style={[styles.container, { backgroundColor }]}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
-                    <ThemedText style={styles.loadingText}>Veuillez patienter...</ThemedText>
-                </View>
-            </View>
-        );
-    }
+    
 
     // Si la session n'est pas valide, ne rien afficher (redirection en cours)
     if (!isSessionValid) {
@@ -831,6 +825,10 @@ export default function HomeScreen() {
                         paddingTop: insets.top + 16,
                     }
                 ]}
+                onLayout={(event) => {
+                    const { height } = event.nativeEvent.layout;
+                    setHeaderHeight(height);
+                }}
             >
                 <ThemedText type="title" style={styles.title}>Mes trajets</ThemedText>
 
@@ -855,13 +853,19 @@ export default function HomeScreen() {
             <FlatList
                 data={departures}
                 renderItem={renderItem}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={[
-                    departures.length === 0 && !loading && !refreshing
+                keyExtractor={keyExtractor}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                updateCellsBatchingPeriod={50}
+                initialNumToRender={10}
+                windowSize={10}
+                contentContainerStyle={
+                    (loading || refreshing) && departures.length === 0
+                        ? styles.contentContainerLoading
+                        : departures.length === 0
                         ? styles.emptyContainer
-                        : styles.contentContainer,
-                    (loading || refreshing) && departures.length === 0 && styles.contentContainerLoading
-                ]}
+                        : styles.contentContainer
+                }
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
@@ -1044,15 +1048,13 @@ const styles = StyleSheet.create({
     },
     contentContainerLoading: {
         flexGrow: 1,
-        minHeight: '100%',
         justifyContent: 'center',
         alignItems: 'center',
     },
     loadingContainer: {
-        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        // minHeight: '100%',
+        width: '100%',
     },
     loadingText: {
         marginTop: 16,

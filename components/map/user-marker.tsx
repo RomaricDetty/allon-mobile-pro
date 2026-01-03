@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Image, Platform, StyleSheet, View } from "react-native";
 import { Marker } from "react-native-maps";
+
 interface UserMarkerProps {
     region: {
         latitude: number;
@@ -14,10 +15,33 @@ interface UserMarkerProps {
 /**
  * Composant de marqueur pour afficher la position de l'utilisateur sur la carte
  * Compatible iOS et Android avec rotation selon le heading
+ * Optimisé pour la performance et la fluidité
  */
 const UserMarker: React.FC<UserMarkerProps> = ({ region, heading }) => {
     const rotationRef = useRef(new Animated.Value(0));
     const previousHeadingRef = useRef<number>(0);
+    const [isAnimating, setIsAnimating] = useState(Platform.OS === "android");
+    const animationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isInitialMountRef = useRef(true);
+
+    /**
+     * Assure l'affichage initial du marker sur Android
+     */
+    useEffect(() => {
+        if (Platform.OS === "android" && isInitialMountRef.current) {
+            isInitialMountRef.current = false;
+            // Désactiver le tracking après le premier rendu sur Android
+            animationTimeoutRef.current = setTimeout(() => {
+                setIsAnimating(false);
+            }, 500);
+        }
+
+        return () => {
+            if (animationTimeoutRef.current) {
+                clearTimeout(animationTimeoutRef.current);
+            }
+        };
+    }, []);
 
     /**
      * Anime la rotation du marker selon le heading
@@ -36,15 +60,34 @@ const UserMarker: React.FC<UserMarkerProps> = ({ region, heading }) => {
                 targetHeading = targetHeading + 360;
             }
 
+            // Nettoyer le timeout précédent si existant
+            if (animationTimeoutRef.current) {
+                clearTimeout(animationTimeoutRef.current);
+            }
+
+            // Activer le tracking pendant l'animation pour Android
+            setIsAnimating(true);
+
             Animated.timing(rotationRef.current, {
                 toValue: targetHeading,
-                duration: 500,
+                duration: 300, // Durée réduite pour plus de fluidité
                 useNativeDriver: true,
             }).start(() => {
                 previousHeadingRef.current = heading;
                 rotationRef.current.setValue(heading);
+                // Désactiver le tracking après l'animation pour optimiser les performances
+                // Sur Android, on garde un peu plus longtemps pour s'assurer que le rendu est correct
+                animationTimeoutRef.current = setTimeout(() => {
+                    setIsAnimating(false);
+                }, Platform.OS === "android" ? 200 : 100);
             });
         }
+
+        return () => {
+            if (animationTimeoutRef.current) {
+                clearTimeout(animationTimeoutRef.current);
+            }
+        };
     }, [heading]);
 
     const rotateInterpolate = rotationRef.current.interpolate({
@@ -52,26 +95,11 @@ const UserMarker: React.FC<UserMarkerProps> = ({ region, heading }) => {
         outputRange: ["0deg", "360deg"],
     });
 
-    // Précharger l'image pour Android
+    // Précharger l'image une seule fois
     const markerImage = useMemo(() => require("@/assets/images/bus.png"), []);
 
-    // Rendu optimisé selon la plateforme
-    const renderMarkerContent = () => {
-        if (Platform.OS === "android") {
-            // Sur Android, utiliser un composant simple sans trop d'imbrication
-            return (
-                <View style={styles.markerContainer}>
-                    {/* <MaterialIcons name="directions-bus-filled" size={50} color="#FFFFFF" /> */}
-                    <Image
-                        source={markerImage}
-                        style={styles.markerImage}
-                        resizeMode="contain"
-                    />
-                </View>
-            );
-        }
-
-        // Sur iOS, on peut utiliser plus d'effets
+    // Rendu unifié pour iOS et Android avec rotation
+    const markerContent = useMemo(() => {
         return (
             <Animated.View
                 style={[
@@ -90,7 +118,7 @@ const UserMarker: React.FC<UserMarkerProps> = ({ region, heading }) => {
                 </View>
             </Animated.View>
         );
-    };
+    }, [rotateInterpolate, markerImage]);
 
     return (
         <Marker
@@ -98,12 +126,12 @@ const UserMarker: React.FC<UserMarkerProps> = ({ region, heading }) => {
                 latitude: region.latitude,
                 longitude: region.longitude,
             }}
-            tracksViewChanges={false}
+            tracksViewChanges={isAnimating}
             anchor={{ x: 0.5, y: 0.5 }}
             flat={true}
             zIndex={999}
         >
-            {renderMarkerContent()}
+            {markerContent}
         </Marker>
     );
 };
@@ -139,16 +167,19 @@ const styles = StyleSheet.create({
 export default React.memo(
     UserMarker,
     (prevProps, nextProps) => {
-        // Re-render uniquement si les coordonnées ou le heading changent significativement
+        // Re-render si les coordonnées ou le heading changent
+        // Seuil de coordonnées optimisé pour un suivi fluide (environ 5-10 mètres)
         const coordsChanged =
             Math.abs(prevProps.region.latitude - nextProps.region.latitude) >
-            0.00001 ||
+            0.00005 ||
             Math.abs(prevProps.region.longitude - nextProps.region.longitude) >
-            0.00001;
+            0.00005;
 
+        // Seuil de heading réduit pour une rotation plus fluide (1 degré)
         const headingChanged =
             prevProps.heading !== nextProps.heading &&
-            Math.abs((prevProps.heading || 0) - (nextProps.heading || 0)) > 5;
+            (prevProps.heading === null || nextProps.heading === null ||
+            Math.abs((prevProps.heading || 0) - (nextProps.heading || 0)) > 1);
 
         return !coordsChanged && !headingChanged;
     }

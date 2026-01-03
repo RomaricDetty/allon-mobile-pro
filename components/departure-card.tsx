@@ -159,8 +159,6 @@ export function DepartureCard({ departure, onTicketPress, onMapPress }: Departur
     const dottedLineColor = isDark ? '#666666' : '#CCCCCC';
     const shadowColor = isDark ? '#000000' : '#000000';
 
-    console.log('departure', departure);
-
     const companyColor = getCompanyColor(departure.company);
 
     /**
@@ -187,14 +185,14 @@ export function DepartureCard({ departure, onTicketPress, onMapPress }: Departur
                 ]}
             >
                 {/* Section supérieure : Compagnie et type de bus */}
-                <View style={styles.topSection}>
+                <View style={[styles.topSection, { gap: 10 }]}>
                     <View style={[styles.companyInfo]}>
                         <View style={[styles.companyLogoCircle, { borderColor: borderColor, borderWidth: 1, borderRadius: 100 }]}>
                             <MaterialIcons name="directions-bus-filled" size={24} color={busIconColor} />
                         </View>
                         <View style={styles.companyTextContainer}>
                             <ThemedText style={[styles.companyName, { color: primaryTextColor }]}>
-                                {departure.company || 'Compagnie'}
+                                {departure.company || 'Compagnie non définie'}
                             </ThemedText>
                         </View>
                     </View>
@@ -269,20 +267,22 @@ export function DepartureCard({ departure, onTicketPress, onMapPress }: Departur
                 </View>
 
                 {/* Section inférieure : Date, Durée et Prix */}
-                <View style={[styles.bottomSection, { borderTopColor: borderColor }]}>
-                    <View style={styles.infoItem}>
-                        <MaterialIcons name="calendar-month" size={16} color={iconColor} />
-                        <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
-                            {departure.date || departure.departureDate || '--'}
-                        </ThemedText>
+                <View style={[styles.bottomSection, { borderTopColor: borderColor, gap: 10 }]}>
+                    <View style={[{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }]}>
+                        <View style={styles.infoItem}>
+                            <MaterialIcons name="calendar-month" size={16} color={iconColor} />
+                            <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
+                                {departure.date || departure.departureDate || '--'}
+                            </ThemedText>
+                        </View>
+                        <View style={styles.infoItem}>
+                            <MaterialIcons name="timer" size={16} color={iconColor} />
+                            <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
+                                {departure.duration || '--'}
+                            </ThemedText>
+                        </View>
                     </View>
-                    <View style={styles.infoItem}>
-                        <MaterialIcons name="timer" size={16} color={iconColor} />
-                        <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
-                            {departure.duration || '--'}
-                        </ThemedText>
-                    </View>
-                    <ThemedText style={[styles.price, { color: getStatusColor(departure.status, isDark) }]}>
+                    <ThemedText style={[styles.price, { color: getStatusColor(departure.status, isDark), textAlign: 'right' }]}>
                         {getStatusLabel(departure.status)}
                     </ThemedText>
                 </View>

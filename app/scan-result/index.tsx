@@ -696,10 +696,10 @@ export default function ScanResultScreen() {
                                                 {/* Checkbox pour la validation */}
                                                 <View style={styles.detailRow}>
                                                     <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                                        Peut être validé
+                                                        Peut être validé ?
                                                     </ThemedText>
                                                     <View style={styles.checkboxContainer}>
-                                                        <View
+                                                        {/* <View
                                                             style={[
                                                                 styles.checkbox,
                                                                 {
@@ -711,7 +711,7 @@ export default function ScanResultScreen() {
                                                             {item.canValidate && (
                                                                 <MaterialIcons name="check" size={18} color="#FFFFFF" />
                                                             )}
-                                                        </View>
+                                                        </View> */}
                                                         <ThemedText style={[styles.checkboxLabel, { color: primaryTextColor }]}>
                                                             {item.canValidate ? 'Oui' : 'Non'}
                                                         </ThemedText>
