@@ -456,7 +456,7 @@ export default function BookingsScreen() {
     /**
      * Gère le clic sur une réservation
      */
-    const handleBookingPress = (booking: ApiBooking) => {
+    const handleBookingPress = useCallback((booking: ApiBooking) => {
         // Formater les données pour correspondre au format attendu par booking-details
         const bookingData = {
             booking: booking,
@@ -468,12 +468,12 @@ export default function BookingsScreen() {
                 bookingData: JSON.stringify(bookingData),
             },
         });
-    };
+    }, []);
 
     /**
      * Rend un élément de la liste
      */
-    const renderItem = ({ item }: { item: ApiBooking }) => {
+    const renderItem = useCallback(({ item }: { item: ApiBooking }) => {
         const statusColor = getStatusColor(item.status, isDark);
         const cardBackgroundColor = isDark ? '#1A1A1A' : '#FFFFFF';
         const primaryTextColor = isDark ? '#FFFFFF' : '#11181C';
@@ -558,7 +558,14 @@ export default function BookingsScreen() {
 
             </TouchableOpacity>
         );
-    };
+    }, [isDark, handleBookingPress]);
+
+    /**
+     * Extrait la clé unique pour chaque élément de la liste
+     */
+    const keyExtractor = useCallback((item: ApiBooking, index: number) => {
+        return item.id || item.code || `booking-${index}`;
+    }, []);
 
     /**
      * Rend le footer avec l'indicateur de chargement
@@ -641,7 +648,12 @@ export default function BookingsScreen() {
             <FlatList
                 data={bookings}
                 renderItem={renderItem}
-                keyExtractor={(item, index) => item.id || item.code || `booking-${index}`}
+                keyExtractor={keyExtractor}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                updateCellsBatchingPeriod={50}
+                initialNumToRender={10}
+                windowSize={10}
                 contentContainerStyle={[
                     bookings.length === 0 && !loading && !refreshing
                         ? styles.emptyContainer

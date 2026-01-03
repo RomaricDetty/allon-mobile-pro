@@ -645,16 +645,16 @@ export default function HomeScreen() {
     /**
      * Gère le clic sur le bouton ticket
      */
-    const handleTicketPress = (departureId: string) => {
+    const handleTicketPress = useCallback((departureId: string) => {
         Alert.alert('Ticket', `Voir le ticket pour le trajet ${departureId}`);
-    };
+    }, []);
 
     /**
      * Gère le clic sur l'icône de carte
      */
-    const handleMapPress = (departureId: string) => {
+    const handleMapPress = useCallback((departureId: string) => {
         Alert.alert('Carte', `Voir la carte pour le trajet ${departureId}`);
-    };
+    }, []);
 
     /**
      * Rend un élément de la liste
@@ -667,7 +667,7 @@ export default function HomeScreen() {
                 onMapPress={() => handleMapPress(item.id)}
             />
         ),
-        []
+        [handleTicketPress, handleMapPress]
     );
 
     /**

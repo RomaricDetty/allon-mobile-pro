@@ -144,7 +144,10 @@ const getStatusColor = (status?: string, isDark: boolean = false): string => {
  * Composant de carte de départ selon le nouveau design
  * Affiche les informations d'un départ avec sections supérieure, médiane et inférieure
  */
-export function DepartureCard({ departure, onTicketPress, onMapPress }: DepartureCardProps) {
+/**
+ * Composant de carte de départ mémorisé pour optimiser les performances
+ */
+export const DepartureCard = React.memo(function DepartureCard({ departure, onTicketPress, onMapPress }: DepartureCardProps) {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
 
@@ -289,7 +292,7 @@ export function DepartureCard({ departure, onTicketPress, onMapPress }: Departur
             </ThemedView>
         </TouchableOpacity>
     );
-}
+});
 
 const styles = StyleSheet.create({
     card: {
