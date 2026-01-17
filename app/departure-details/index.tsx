@@ -155,7 +155,15 @@ export default function DepartureDetailsScreen() {
         // Crée une clé unique pour ce trajet basée sur l'ID du départ
         const trajectoryAlertKey = `trajectory_alert_${departure.id}`;
 
+
         try {
+
+            const userRole = await AsyncStorage.getItem('user_role');
+            console.log('userRole ===>, ', userRole);
+            if (userRole?.toUpperCase() !== 'DRIVER' && userRole?.toUpperCase() !== 'SUPERVISOR') {
+                Alert.alert('Erreur', 'Vous n\'avez pas les permissions requises pour démarrer le trajet.');
+                return;
+            }
             // Vérifie si l'alerte a déjà été affichée pour ce trajet
             const alertAlreadyShown = await AsyncStorage.getItem(trajectoryAlertKey);
 
@@ -306,6 +314,9 @@ export default function DepartureDetailsScreen() {
             }
 
             const response = await processScanApi(qrCodeData, token);
+            setShowSearchModal(false);
+            setTicketReference('');
+            
             router.push({
                 pathname: '/scan-result',
                 params: {
@@ -808,14 +819,14 @@ export default function DepartureDetailsScreen() {
                                             />
                                             {ticketReference.length > 0 && (
                                                 <TouchableOpacity
-                                                    style={[styles.clearButton, 
-                                                        { 
-                                                            backgroundColor: isDark ? '#3A3A3C' : '#CCCCCC', 
-                                                            width: 25, height: 25, borderRadius: 100, 
-                                                            borderWidth: 1, borderColor: borderColor,
-                                                            justifyContent: 'center', alignItems: 'center',
-                                                            top: '45%',
-                                                        }]}
+                                                    style={[styles.clearButton,
+                                                    {
+                                                        backgroundColor: isDark ? '#3A3A3C' : '#CCCCCC',
+                                                        width: 25, height: 25, borderRadius: 100,
+                                                        borderWidth: 1, borderColor: borderColor,
+                                                        justifyContent: 'center', alignItems: 'center',
+                                                        top: '45%',
+                                                    }]}
                                                     onPress={() => setTicketReference('')}
                                                     disabled={isSearching}
                                                 >

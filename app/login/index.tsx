@@ -6,22 +6,32 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 /**
  * Composant Logo optimisé - extrait pour éviter les re-créations
  */
-const Logo = React.memo(() => (
-    <View style={styles.logoContainer}>
+const Logo = React.memo(({ logoScale, logoTranslateY }: { logoScale: Animated.Value; logoTranslateY: Animated.Value }) => (
+    <Animated.View
+        style={[
+            styles.logoContainer,
+            {
+                transform: [
+                    { scale: logoScale },
+                    { translateY: logoTranslateY }
+                ],
+            }
+        ]}
+    >
         <View style={styles.logoFront}>
             <Image
                 source={require('@/assets/images/allon-logo-transparent.png')}
                 resizeMode="cover"
-                style={styles.logoImage}
+                style={{ width: 100, height: 100 }}
             />
         </View>
-    </View>
+    </Animated.View>
 ));
 
 Logo.displayName = 'Logo';
@@ -43,6 +53,12 @@ const Login = () => {
 
     // Animation pour le bouton
     const buttonOpacity = useMemo(() => new Animated.Value(1), []);
+
+    // Valeurs animées pour réduire les éléments quand le clavier apparaît
+    const logoScale = useRef(new Animated.Value(1)).current;
+    const headerScale = useRef(new Animated.Value(1)).current;
+    const logoTranslateY = useRef(new Animated.Value(0)).current;
+    const headerTranslateY = useRef(new Animated.Value(0)).current;
 
     // Couleurs dynamiques basées sur le thème
     const textColor = useThemeColor({}, 'text');
@@ -135,7 +151,7 @@ const Login = () => {
     const saveUserData = useCallback(async (responseData: any) => {
         const expiresInSeconds = responseData.expires_in || 3600;
         const expiresAtTimestamp = Math.floor(Date.now() / 1000) + expiresInSeconds;
-        
+
         // Batch les opérations AsyncStorage pour améliorer les performances
         await AsyncStorage.multiSet([
             ['token', responseData.access_token],
@@ -155,11 +171,17 @@ const Login = () => {
         // Validation avant soumission
         const isEmailValid = validateEmail(email);
         const isPasswordValid = validatePassword(password);
-        
+
         setEmailTouched(true);
         setPasswordTouched(true);
 
         if (!isEmailValid || !isPasswordValid) {
+            Alert.alert('Attention !', 'Veuillez vérifier vos informations de connexion et réessayer.');
+            Animated.timing(buttonOpacity, {
+                toValue: 1,
+                duration: 200,
+                useNativeDriver: true,
+            }).start();
             return;
         }
 
@@ -173,9 +195,9 @@ const Login = () => {
                 useNativeDriver: true,
             }).start();
 
-            const response = await authLogin({ 
-                emailOrUsername: email.trim().toLowerCase(), 
-                password: password.trim() 
+            const response = await authLogin({
+                emailOrUsername: email.trim().toLowerCase(),
+                password: password.trim()
             });
 
             if (response.status === 200) {
@@ -186,7 +208,7 @@ const Login = () => {
                 }
 
                 Alert.alert(
-                    'Attention !', 
+                    'Attention !',
                     'Vous n\'avez pas les permissions requises pour accéder à cette application.'
                 );
                 return;
@@ -195,10 +217,10 @@ const Login = () => {
             Alert.alert('Attention !', response.data?.message || 'Une erreur est survenue lors de la connexion.');
         } catch (error: any) {
             console.error('Erreur lors de la connexion : ', error);
-            
-            const errorMessage = error.response?.data?.message 
+
+            const errorMessage = error.response?.data?.message
                 || 'Une erreur est survenue lors de la connexion. Veuillez vérifier vos informations et réessayer.';
-            
+
             Alert.alert('Attention !', errorMessage);
         } finally {
             setIsLoading(false);
@@ -215,11 +237,77 @@ const Login = () => {
         container: { backgroundColor: colors.scrollBackground },
         title: { color: colors.text },
         subtitle: { color: colors.secondaryText },
-        sectionCard: { 
-            backgroundColor: colors.cardBackground, 
-            borderColor: colors.cardBorder 
+        sectionCard: {
+            backgroundColor: colors.cardBackground,
+            borderColor: colors.cardBorder
         },
     }), [colors]);
+
+    /**
+     * Gère l'animation de réduction/agrandissement des éléments selon l'état du clavier
+     */
+    useEffect(() => {
+        const keyboardWillShow = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+            () => {
+                Animated.parallel([
+                    Animated.timing(logoScale, {
+                        toValue: 0.75,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(headerScale, {
+                        toValue: 0.9,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(logoTranslateY, {
+                        toValue: -8,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(headerTranslateY, {
+                        toValue: -6,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                ]).start();
+            }
+        );
+
+        const keyboardWillHide = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+            () => {
+                Animated.parallel([
+                    Animated.timing(logoScale, {
+                        toValue: 1,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(headerScale, {
+                        toValue: 1,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(logoTranslateY, {
+                        toValue: 0,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(headerTranslateY, {
+                        toValue: 0,
+                        duration: 250,
+                        useNativeDriver: true,
+                    }),
+                ]).start();
+            }
+        );
+
+        return () => {
+            keyboardWillShow.remove();
+            keyboardWillHide.remove();
+        };
+    }, [logoScale, headerScale, logoTranslateY, headerTranslateY]);
 
     return (
         <KeyboardAvoidingView
@@ -233,17 +321,29 @@ const Login = () => {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
             >
-                <Logo />
+                <Logo logoScale={logoScale} logoTranslateY={logoTranslateY} />
 
-                <View style={styles.header}>
+                <Animated.View
+                    style={[
+                        styles.header,
+                        {
+                            transform: [
+                                { scale: headerScale },
+                                { translateY: headerTranslateY }
+                            ],
+                        }
+                    ]}
+                >
                     <Text style={[styles.title, dynamicStyles.title]}>Bienvenue !</Text>
                     <Text style={[styles.subtitle, dynamicStyles.subtitle]}>
                         Veuillez renseigner vos informations de connexion pour accéder à votre espace pro.
                     </Text>
-                </View>
+                </Animated.View>
 
                 <View style={[styles.sectionCard, dynamicStyles.sectionCard]}>
                     <View style={styles.form}>
+                        
+                        {/* Champ pour l'email ou le nom d'utilisateur */}
                         <AuthFormField
                             label="Adresse email ou nom d'utilisateur"
                             value={email}
@@ -254,6 +354,8 @@ const Login = () => {
                             errors={emailError}
                             touchedFields={emailTouched}
                         />
+
+                        {/* Champ pour le mot de passe */}
                         <PasswordField
                             label="Mot de passe"
                             value={password}
@@ -263,6 +365,13 @@ const Login = () => {
                             errors={passwordError}
                             touchedFields={passwordTouched}
                         />
+
+                        {/* Bouton pour oublier le mot de passe */}
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Pressable onPress={() => router.push('/login/forgot-password')}>
+                                <Text style={styles.forgotPassword}>Mot de passe oublié ?</Text>
+                            </Pressable>
+                        </View>
                     </View>
                 </View>
 
@@ -270,10 +379,10 @@ const Login = () => {
                     <Pressable
                         style={[
                             styles.primaryButton,
-                            (!isValid || isLoading) && styles.primaryButtonDisabled
+                            (isLoading) && styles.primaryButtonDisabled
                         ]}
                         onPress={handleSignIn}
-                        disabled={!isValid || isLoading}
+                        disabled={isLoading}
                     >
                         {isLoading ? (
                             <ActivityIndicator size="small" color="#FFFFFF" />
@@ -304,7 +413,7 @@ const styles = StyleSheet.create({
         width: 100,
         height: 100,
         alignSelf: 'center',
-        marginBottom: 40,
+        // marginBottom: 10,
         position: 'relative',
         justifyContent: 'center',
         alignItems: 'center',
@@ -321,13 +430,13 @@ const styles = StyleSheet.create({
         height: 100,
     },
     header: {
-        marginBottom: 32,
+        marginBottom: 20,
         alignItems: 'center',
     },
     title: {
         fontSize: 32,
         fontFamily: 'Ubuntu_Bold',
-        marginBottom: 8,
+        marginBottom: 4,
         textAlign: 'center',
     },
     subtitle: {
@@ -361,6 +470,13 @@ const styles = StyleSheet.create({
         padding: 16,
         marginBottom: 20,
         borderWidth: 1,
+    },
+    forgotPassword: {
+        fontSize: 15,
+        fontFamily: 'Ubuntu_Medium',
+        color: '#1776BA',
+        textAlign: 'right',
+        marginTop: 10,
     },
 });
 

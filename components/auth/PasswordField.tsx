@@ -50,9 +50,7 @@ export const PasswordField = ({
                 styles.inputContainer,
                 {
                     backgroundColor: inputBackgroundColor,
-                    borderColor: errors && touchedFields 
-                    ? '#FF0000' 
-                    : inputBorderColor
+                    borderColor: inputBorderColor
                 }
             ]}>
                 <TextInput

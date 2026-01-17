@@ -5,7 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -189,12 +189,14 @@ export default function ScanResultScreen() {
     // État pour gérer les billets sélectionnés
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
     const [isValidating, setIsValidating] = useState(false);
+    const [userRole, setUserRole] = useState<string | undefined>(undefined);
 
     // Parse les données de la réservation depuis les paramètres
     let bookingData: BookingData | null = null;
     try {
         if (params.bookingData) {
             bookingData = JSON.parse(params.bookingData) as BookingData;
+            console.log('bookingData ===>, ', JSON.stringify(bookingData));
         }
     } catch (error) {
         console.error('Erreur lors du parsing des données de réservation:', error);
@@ -371,6 +373,49 @@ export default function ScanResultScreen() {
         });
 
         return unusedItems.length;
+    };
+
+    useEffect(() => {
+        const checkUserRole = async () => {
+            const userRole = await AsyncStorage.getItem('user_role');
+            setUserRole(userRole?.toUpperCase());
+            console.log('userRole ===>, ', userRole);
+        };
+        checkUserRole();
+    }, []);
+
+    // Détermine si l'utilisateur peut valider les billets
+    const canValidateTickets = userRole === 'DRIVER' || userRole === 'SUPERVISOR';
+    
+    // Détermine si on doit afficher le bouton bagages
+    const showBaggageButton = userRole === 'PORTER';
+
+    /**
+     * Gère l'enregistrement des bagages pour un passager
+     * Navigue vers l'écran de gestion des bagages avec les paramètres nécessaires
+     * @param itemId - L'ID du billet/passager (bookingItemId)
+     */
+    const handleRegisterBaggage = async (itemId: string) => {
+        const departureId = booking.departure?.id;
+        const bookingId = booking.id;
+
+        if (!departureId || !bookingId) {
+            Alert.alert(
+                'Erreur',
+                'Les informations nécessaires ne sont pas disponibles.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
+        router.push({
+            pathname: '/register-baggage',
+            params: {
+                bookingItemId: itemId,
+                departureId: departureId,
+                bookingId: bookingId,
+            },
+        });
     };
 
     return (
@@ -597,14 +642,11 @@ export default function ScanResultScreen() {
                                 
                                 {booking.items.map((item: any, index: number) => {
                                     const isSelected = selectedItems.has(item.id);
-                                    const canSelect = item.canValidate === true;
+                                    const canSelect = item.canValidate === true && canValidateTickets;
 
                                     return (
-                                        <TouchableOpacity
+                                        <View
                                             key={item.id || index}
-                                            activeOpacity={canSelect ? 0.7 : 1}
-                                            onPress={() => canSelect && toggleItemSelection(item.id)}
-                                            disabled={!canSelect}
                                             style={[
                                                 styles.itemCard,
                                                 {
@@ -618,7 +660,12 @@ export default function ScanResultScreen() {
                                             ]}
                                         >
                                             {/* En-tête du billet */}
-                                            <View style={styles.itemHeader}>
+                                            <TouchableOpacity
+                                                activeOpacity={canSelect ? 0.7 : 1}
+                                                onPress={() => canSelect && toggleItemSelection(item.id)}
+                                                disabled={!canSelect}
+                                                style={styles.itemHeader}
+                                            >
                                                 <View style={styles.itemHeaderLeft}>
                                                     {canSelect && (
                                                         <View
@@ -650,7 +697,7 @@ export default function ScanResultScreen() {
                                                         </ThemedText>
                                                     </View>
                                                 )}
-                                            </View>
+                                            </TouchableOpacity>
 
                                             {/* Informations du passager */}
                                             <View style={styles.itemContent}>
@@ -717,8 +764,28 @@ export default function ScanResultScreen() {
                                                         </ThemedText>
                                                     </View>
                                                 </View>
+
+                                                {/* Bouton Enregistrer bagages (visible uniquement pour PORTER) */}
+                                                {!showBaggageButton && (
+                                                    <View style={[styles.baggageButtonContainer, { borderTopColor: separatorColor }]}>
+                                                        <TouchableOpacity
+                                                            style={[
+                                                                styles.baggageButton,
+                                                                {
+                                                                    backgroundColor: '#1776BA',
+                                                                },
+                                                            ]}
+                                                            onPress={() => handleRegisterBaggage(item.id)}
+                                                        >
+                                                            <MaterialIcons name="luggage" size={20} color="#FFFFFF" />
+                                                            <ThemedText style={styles.baggageButtonText}>
+                                                                Enregistrer bagages
+                                                            </ThemedText>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                )}
                                             </View>
-                                        </TouchableOpacity>
+                                        </View>
                                     );
                                 })}
                             </View>
@@ -742,8 +809,8 @@ export default function ScanResultScreen() {
                 </View>
             </ScrollView>
 
-            {/* Bouton de validation fixe en bas */}
-            {selectedItems.size > 0 && (
+            {/* Bouton de validation fixe en bas (visible uniquement si l'utilisateur peut valider) */}
+            {selectedItems.size > 0 && canValidateTickets && (
                 <View
                     style={[
                         styles.validationButtonContainer,
@@ -994,6 +1061,25 @@ const styles = StyleSheet.create({
     },
     validationButtonText: {
         fontSize: 16,
+        fontFamily: 'Ubuntu_Bold',
+        color: '#FFFFFF',
+    },
+    baggageButtonContainer: {
+        marginTop: 12,
+        paddingTop: 12,
+        borderTopWidth: 1,
+    },
+    baggageButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        gap: 8,
+    },
+    baggageButtonText: {
+        fontSize: 14,
         fontFamily: 'Ubuntu_Bold',
         color: '#FFFFFF',
     },

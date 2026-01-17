@@ -2,15 +2,18 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import React from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
  * Interface pour les données de réservation
  */
 interface ApiBooking {
+    id?: string;
+    departureId?: string;
     code: string;
     status: string;
     type?: string;
@@ -59,6 +62,7 @@ interface ApiBooking {
         departureDateTime?: string;
         status?: string;
         trip?: any;
+        id?: string;
     };
     summary?: {
         canValidateAll?: boolean;
@@ -158,7 +162,7 @@ const getPaymentMethodLabel = (method?: string): string => {
         'BANK_TRANSFER': 'Virement bancaire',
     };
 
-    return PAYMENT_METHOD_MAPPING[method.toUpperCase()] || method;
+    return PAYMENT_METHOD_MAPPING[method.toUpperCase()] || method.replaceAll('_', ' ').toUpperCase();
 };
 
 /**
@@ -319,6 +323,7 @@ export default function BookingDetailsScreen() {
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{ bookingData: string }>();
+    const [userRole, setUserRole] = useState<string | undefined>(undefined);
 
     // Parse les données de la réservation depuis les paramètres
     let booking: ApiBooking | null = null;
@@ -336,6 +341,86 @@ export default function BookingDetailsScreen() {
         router.back();
         return null;
     }
+
+    /**
+     * Récupère le rôle de l'utilisateur depuis AsyncStorage
+     */
+    useEffect(() => {
+        const checkUserRole = async () => {
+            const userRole = await AsyncStorage.getItem('user_role');
+            setUserRole(userRole?.toUpperCase());
+            console.log('userRole ===>, ', userRole);
+        };
+        checkUserRole();
+    }, []);
+
+    // Détermine si on doit afficher le bouton bagages
+    const showBaggageButton = userRole === 'PORTER';
+
+    /**
+     * Trouve l'item correspondant à un passager
+     * @param passenger - Le passager pour lequel chercher l'item
+     * @param index - L'index du passager dans la liste
+     * @returns L'item correspondant ou null
+     */
+    const findItemForPassenger = (passenger: any, index: number): any => {
+        if (!booking?.items || booking.items.length === 0) {
+            return null;
+        }
+
+        // Essayer de trouver l'item par correspondance exacte (firstName, lastName, seatNumber)
+        const matchingItem = booking.items.find((item: any) => {
+            const firstNameMatch = item.firstName && passenger.firstName && 
+                item.firstName.toLowerCase() === passenger.firstName.toLowerCase();
+            const lastNameMatch = item.lastName && passenger.lastName && 
+                item.lastName.toLowerCase() === passenger.lastName.toLowerCase();
+            const seatMatch = item.seatNumber && passenger.seatNumber && 
+                item.seatNumber === passenger.seatNumber;
+            
+            return (firstNameMatch && lastNameMatch) || (seatMatch && (firstNameMatch || lastNameMatch));
+        });
+
+        // Si aucun match exact, utiliser l'index si l'ordre est le même
+        return matchingItem || booking.items[index] || null;
+    };
+
+    /**
+     * Gère l'enregistrement des bagages pour un passager
+     * Navigue vers l'écran de gestion des bagages avec les paramètres nécessaires
+     * @param itemId - L'ID du billet pour lequel enregistrer les bagages
+     */
+    const handleRegisterBaggage = (itemId: any) => {
+        if (!itemId) {
+            Alert.alert(
+                'Erreur',
+                'L\'ID du billet n\'est pas disponible.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        // Récupérer le departureId depuis booking.departure
+        const departure: any = booking?.departure;
+        const departureId: any = booking?.departureId;
+        const bookingId: any = booking?.id;
+
+        if (!departureId || !bookingId) {
+            Alert.alert(
+                'Erreur !',
+                'Les informations nécessaires pour enregistrer les bagages ne sont pas disponibles.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
+        router.push({
+            pathname: '/register-baggage',
+            params: {
+                bookingItemId: itemId?.id,
+                departureId: departureId,
+                bookingId: bookingId,
+            },
+        });
+    };
 
     // Détermine le type de voyage
     const tripType = (booking.tripType || booking.type || '').toUpperCase();
@@ -480,7 +565,7 @@ export default function BookingDetailsScreen() {
 
                         {renderDetailRow('Montant total', formatAmount(booking.totalAmount, booking.currency))}
                         {renderDetailRow('Méthode de paiement', getPaymentMethodLabel(booking.paymentMethod))}
-                        {booking.paymentProvider && renderDetailRow('Opérateur de paiement', booking.paymentProvider)}
+                        {booking.paymentProvider && renderDetailRow('Opérateur de paiement', booking.paymentProvider.replaceAll('_', ' ').toUpperCase())}
                         {renderDetailRow('Canal', getChannelLabel(booking.channel))}
                     </View>
 
@@ -616,6 +701,26 @@ export default function BookingDetailsScreen() {
                                         {passenger.lastName && renderDetailRow('Nom', passenger.lastName)}
                                         {passenger.passengerType && renderDetailRow('Type', getPassengerTypeLabel(passenger.passengerType))}
                                         {passenger.seatNumber && renderDetailRow('Siège', passenger.seatNumber)}
+                                        
+                                        {/* Bouton Enregistrer bagages (visible uniquement pour PORTER) */}
+                                        {showBaggageButton && (
+                                            <View style={[styles.baggageButtonContainer, { borderTopColor: separatorColor }]}>
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.baggageButton,
+                                                        {
+                                                            backgroundColor: '#1776BA',
+                                                        },
+                                                    ]}
+                                                    onPress={() => handleRegisterBaggage(passenger)}
+                                                >
+                                                    <MaterialIcons name="luggage" size={20} color="#FFFFFF" />
+                                                    <ThemedText style={styles.baggageButtonText}>
+                                                        Enregistrer bagages
+                                                    </ThemedText>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
                                     </View>
                                 ))}
                             </View>
@@ -830,6 +935,25 @@ const styles = StyleSheet.create({
     busSubtitle: {
         fontSize: 16,
         fontFamily: 'Ubuntu_Medium',
+    },
+    baggageButtonContainer: {
+        marginTop: 12,
+        paddingTop: 12,
+        borderTopWidth: 1,
+    },
+    baggageButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        gap: 8,
+    },
+    baggageButtonText: {
+        fontSize: 14,
+        fontFamily: 'Ubuntu_Bold',
+        color: '#FFFFFF',
     },
 });
 

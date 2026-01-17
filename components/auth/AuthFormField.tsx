@@ -55,9 +55,7 @@ export const AuthFormField = ({
                     {
                         backgroundColor: inputBackgroundColor,
                         color: textColor,
-                        borderColor: errors && touchedFields 
-                        ? '#FF0000' 
-                        : inputBorderColor
+                        borderColor: inputBorderColor
                     }
                 ]}
                 value={value}
