@@ -71,6 +71,12 @@ export default function DepartureDetailsScreen() {
     // Mettre à jour l'état local quand le départ initial change
     useEffect(() => {
         setDeparture(initialDeparture);
+        const checkUserRole = async () => {
+            const userRole = await AsyncStorage.getItem('user_role');
+            setUserRole(userRole?.toUpperCase());
+            console.log('userRole ===>, ', userRole);
+        };
+        checkUserRole();
     }, [initialDeparture]);
 
     // Écouter les événements de mise à jour de statut
@@ -123,7 +129,8 @@ export default function DepartureDetailsScreen() {
     const [showSearchModal, setShowSearchModal] = useState(false);
     const [ticketReference, setTicketReference] = useState('');
     const [isSearching, setIsSearching] = useState(false);
-
+    const [userRole, setUserRole] = useState<string | undefined>(undefined);
+    
     /**
      * Nettoie les données d'authentification stockées
      */
@@ -316,7 +323,7 @@ export default function DepartureDetailsScreen() {
             const response = await processScanApi(qrCodeData, token);
             setShowSearchModal(false);
             setTicketReference('');
-            
+
             router.push({
                 pathname: '/scan-result',
                 params: {
@@ -446,6 +453,9 @@ export default function DepartureDetailsScreen() {
             },
         });
     };
+
+    // Détermine si on doit afficher le bouton de démarrage du trajet
+    const showStartTrajectButton = userRole?.toUpperCase() === 'DRIVER' || userRole?.toUpperCase() === 'SUPERVISOR';
 
     return (
         <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#F3F3F7' }]}>
@@ -739,13 +749,15 @@ export default function DepartureDetailsScreen() {
                                 <MaterialIcons name="check-circle" size={24} color={primaryTextColor} />
                                 <ThemedText style={[styles.scanButtonText, { color: primaryTextColor }]}>Validation</ThemedText>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.downloadButton, { backgroundColor: "#1776BA" }]}
-                                onPress={handleStartTraject}
-                            >
-                                <MaterialIcons name="directions-bus-filled" size={24} color="#FFFFFF" />
-                                <ThemedText style={[styles.downloadButtonText, {}]}>Démarrer</ThemedText>
-                            </TouchableOpacity>
+                            {showStartTrajectButton && (
+                                <TouchableOpacity
+                                    style={[styles.downloadButton, { backgroundColor: "#1776BA" }]}
+                                    onPress={handleStartTraject}
+                                >
+                                    <MaterialIcons name="directions-bus-filled" size={24} color="#FFFFFF" />
+                                    <ThemedText style={[styles.downloadButtonText, {}]}>Démarrer</ThemedText>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </View>
                 )}

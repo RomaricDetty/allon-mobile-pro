@@ -244,14 +244,11 @@ export default function LuggageDetailsScreen() {
                                 if (response.data.oversizedFee > 0) {
                                     Alert.alert(
                                         'Frais supplémentaires',
-                                        `Ce bagage nécessite le paiement de frais supplémentaires de ${response.data.oversizedFee} ${response.data.currency || 'XOF'}.`,
+                                        `Ce bagage nécessite le paiement de frais supplémentaires de ${response.data.oversizedFee} ${response.data.currency || 'XOF. Veuillez vous rendre à la caisse pour payer.'}.`,
                                         [
+                                            
                                             {
-                                                text: 'Payer maintenant',
-                                                onPress: () => handlePayOversizedFee(response.data.oversizedFee, response.data.currency),
-                                            },
-                                            {
-                                                text: 'Plus tard',
+                                                text: 'Fermer',
                                                 style: 'cancel',
                                             },
                                         ]
@@ -446,7 +443,7 @@ export default function LuggageDetailsScreen() {
                                         {luggage.status === 'REGISTERED'
                                             ? 'Enregistré'
                                             : luggage.status === 'CHECKED_IN'
-                                            ? 'Enregistré à l\'embarquement'
+                                            ? 'Vérifié'
                                             : luggage.status}
                                     </ThemedText>
                                 </View>
@@ -808,7 +805,7 @@ export default function LuggageDetailsScreen() {
                                     <View style={[styles.paymentWarning, { backgroundColor: '#FF950020', borderColor: '#FF9500' }]}>
                                         <MaterialIcons name="info" size={16} color="#FF9500" />
                                         <ThemedText style={[styles.paymentWarningText, { color: '#FF9500' }]}>
-                                            Des frais supplémentaires doivent être payés
+                                            Veuillez vous rendre à la caisse pour payer les frais supplémentaires.
                                         </ThemedText>
                                     </View>
                                 )}
@@ -843,37 +840,6 @@ export default function LuggageDetailsScreen() {
                     </TouchableOpacity>
                 )}
 
-                {/* Bouton paiement si frais supplémentaires et non payés */}
-                {isCheckedIn && hasAnyAdditionalFee && !isPaid && (
-                    <TouchableOpacity
-                        style={[
-                            styles.payButton,
-                            {
-                                backgroundColor: '#FF9500',
-                                opacity: isLoading ? 0.6 : 1,
-                            },
-                        ]}
-                        onPress={() => {
-                            const totalFee = (luggage.oversizedFee || 0) + (luggage.excessWeightFee || 0) + (luggage.fragileFee || 0);
-                            handlePayOversizedFee(totalFee, luggage.currency || 'XOF');
-                        }}
-                        disabled={isLoading}
-                    >
-                        {isLoading ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                            <>
-                                <MaterialIcons name="payment" size={24} color="#FFFFFF" />
-                                <ThemedText style={styles.payButtonText}>
-                                    Payer les frais ({formatAmount(
-                                        (luggage.oversizedFee || 0) + (luggage.excessWeightFee || 0) + (luggage.fragileFee || 0),
-                                        luggage.currency
-                                    )})
-                                </ThemedText>
-                            </>
-                        )}
-                    </TouchableOpacity>
-                )}
             </ScrollView>
 
             {/* Modal QR Code */}

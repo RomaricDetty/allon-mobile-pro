@@ -85,7 +85,7 @@ interface ExistingLuggage extends LuggageItem {
 export const getLuggageTypeLabel = (type: LuggageType): string => {
     const TYPE_MAPPING: Record<LuggageType, string> = {
         [LuggageType.CABIN]: 'Bagage cabine',
-        [LuggageType.CHECKED]: 'Bagage soute standard',
+        [LuggageType.CHECKED]: 'Bagage soute',
         [LuggageType.OVERSIZED]: 'Bagage surdimensionné',
         [LuggageType.FRAGILE]: 'Bagage fragile',
         [LuggageType.SPORTS_EQUIPMENT]: 'Équipement sportif',
@@ -103,7 +103,7 @@ const getLuggageStatusLabel = (status?: string): string => {
 
     const STATUS_MAPPING: Record<string, string> = {
         'REGISTERED': 'Enregistré',
-        'CHECKED_IN': 'Enregistré à l\'embarquement',
+        'CHECKED_IN': 'Vérifié',
         'LOADED': 'Chargé',
         'UNLOADED': 'Déchargé',
         'DELIVERED': 'Livré',

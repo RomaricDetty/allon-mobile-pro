@@ -766,7 +766,7 @@ export default function ScanResultScreen() {
                                                 </View>
 
                                                 {/* Bouton Enregistrer bagages (visible uniquement pour PORTER) */}
-                                                {!showBaggageButton && (
+                                                {showBaggageButton && (
                                                     <View style={[styles.baggageButtonContainer, { borderTopColor: separatorColor }]}>
                                                         <TouchableOpacity
                                                             style={[

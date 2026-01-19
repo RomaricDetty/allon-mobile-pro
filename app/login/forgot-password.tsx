@@ -305,14 +305,21 @@ export default function ForgotPasswordScreen() {
                 code: verificationCode.trim(),
             });
 
-            if (response && response.status === 200) {
+            if (response && response.status === 200 && response.data?.verified) {
                 // Sauvegarder le verificationToken pour l'étape suivante
                 if (response.data?.verificationToken) {
                     setVerificationToken(response.data.verificationToken);
                 }
                 setCurrentStep(4);
             } else {
-                Alert.alert('Attention !', 'Le code de vérification est incorrect. Veuillez réessayer.');
+                // Alert.alert('Attention !', response.data?.message || 'Le code de vérification est incorrect. Veuillez réessayer.' + ' ' + response.data?.remainingAttempts + ' tentatives restantes.');
+                if (response.data?.remainingAttempts === 0 && response.data?.verified === false) {
+                    Alert.alert('Attention !', 'Vous avez atteint le nombre maximum de tentatives. Veuillez réessayer svp.');
+                    router.back();
+                } else {
+                    Alert.alert('Attention !', response.data?.message || 'Le code de vérification est incorrect. Veuillez réessayer.' + ' ' + response.data?.remainingAttempts + ' tentatives restantes.');
+                    setCurrentStep(3);
+                }
             }
         } catch (error: any) {
             console.error('Erreur lors de la vérification du code : ', error);
