@@ -13,6 +13,7 @@ import {
     Alert,
     Animated,
     Modal,
+    Platform,
     StyleSheet,
     TouchableOpacity,
     View,
@@ -67,8 +68,13 @@ export default function TrackRouteScreen() {
     
     const zoomRef = useRef({
         latitudeDelta: DEFAULT_LATITUDE_DELTA,
-        longitudeDelta: defaultLongitudeDelta,
+        longitudeDelta: DEFAULT_LATITUDE_DELTA * (dimensions.width / dimensions.height),
     });
+    
+    // Mettre à jour zoomRef quand defaultLongitudeDelta est disponible
+    useEffect(() => {
+        zoomRef.current.longitudeDelta = defaultLongitudeDelta;
+    }, [defaultLongitudeDelta]);
 
     const previousLocationRef = useRef<{
         latitude: number;
@@ -264,7 +270,7 @@ export default function TrackRouteScreen() {
      */
     const updateCameraPosition = useCallback(
         (latitude: number, longitude: number, heading: number | null) => {
-            if (isUserInteractingRef.current) {
+            if (isUserInteractingRef.current || !mapViewRef.current) {
                 return;
             }
 
@@ -278,31 +284,41 @@ export default function TrackRouteScreen() {
 
             lastCameraUpdateRef.current = now;
 
+            // Vérifier que les valeurs sont valides
+            if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+                logWithTag("MAP", "Valeurs de position invalides, mise à jour ignorée");
+                return;
+            }
+
             // Calculer le zoom actuel à partir des deltas pour le préserver
             const currentZoom = calculateZoomFromDelta(zoomRef.current.latitudeDelta);
 
-            if (heading !== null && heading >= 0) {
-                // Si on a un heading, utiliser animateCamera pour la rotation
-                // Préserver le zoom actuel
-                mapViewRef.current?.animateCamera(
-                    {
-                        center: { latitude, longitude },
-                        heading: heading,
-                        zoom: currentZoom,
-                    },
-                    { duration: 500 } // Durée réduite pour plus de réactivité
-                );
-            } else {
-                // Sinon, utiliser animateToRegion (plus performant)
-                mapViewRef.current?.animateToRegion(
-                    {
-                        latitude,
-                        longitude,
-                        latitudeDelta: zoomRef.current.latitudeDelta,
-                        longitudeDelta: zoomRef.current.longitudeDelta,
-                    },
-                    500
-                );
+            try {
+                if (heading !== null && heading >= 0 && !isNaN(heading) && isFinite(heading)) {
+                    // Si on a un heading, utiliser animateCamera pour la rotation
+                    // Préserver le zoom actuel
+                    mapViewRef.current.animateCamera(
+                        {
+                            center: { latitude, longitude },
+                            heading: heading,
+                            zoom: currentZoom,
+                        },
+                        { duration: 500 } // Durée réduite pour plus de réactivité
+                    );
+                } else {
+                    // Sinon, utiliser animateToRegion (plus performant)
+                    mapViewRef.current.animateToRegion(
+                        {
+                            latitude,
+                            longitude,
+                            latitudeDelta: zoomRef.current.latitudeDelta,
+                            longitudeDelta: zoomRef.current.longitudeDelta,
+                        },
+                        500
+                    );
+                }
+            } catch (error) {
+                logError("[MAP] Erreur lors de la mise à jour de la caméra:", error);
             }
         },
         [calculateZoomFromDelta]
@@ -388,49 +404,143 @@ export default function TrackRouteScreen() {
 
     /**
      * Initialise le suivi de position
+     * Gère les permissions et vérifie que les services de localisation sont activés
      */
     useEffect(() => {
         let isMounted = true;
 
         const startLocationTracking = async () => {
             try {
-                logWithTag("LOCATION", "Demande de permission...");
-                const { status } = await Location.requestForegroundPermissionsAsync();
+                // Vérifier d'abord si les permissions sont déjà accordées
+                logWithTag("LOCATION", "Vérification des permissions...");
+                let { status } = await Location.getForegroundPermissionsAsync();
+
+                // Si les permissions ne sont pas accordées, les demander
+                if (status !== "granted") {
+                    logWithTag("LOCATION", "Demande de permission...");
+                    const permissionResponse = await Location.requestForegroundPermissionsAsync();
+                    status = permissionResponse.status;
+                }
 
                 if (status !== "granted") {
-                    Alert.alert(
-                        "Permission refusée",
-                        "L'accès à la localisation est nécessaire pour suivre le trajet.",
-                        [{ text: "OK", onPress: () => router.back() }]
-                    );
+                    logWithTag("LOCATION", "Permission refusée:", status);
+                    if (isMounted) {
+                        Alert.alert(
+                            "Permission refusée",
+                            "L'accès à la localisation est nécessaire pour suivre le trajet. Veuillez activer la localisation dans les paramètres de l'application.",
+                            [{ text: "OK", onPress: () => router.back() }]
+                        );
+                        setIsLoading(false);
+                    }
+                    return;
+                }
+
+                logWithTag("LOCATION", "Permission accordée");
+
+                // Sur Android, vérifier que les services de localisation sont activés
+                if (Platform.OS === "android") {
+                    const servicesEnabled = await Location.hasServicesEnabledAsync();
+                    if (!servicesEnabled) {
+                        logWithTag("LOCATION", "Services de localisation désactivés");
+                        if (isMounted) {
+                            Alert.alert(
+                                "Localisation désactivée",
+                                "Veuillez activer les services de localisation (GPS) dans les paramètres de votre appareil.",
+                                [{ text: "OK", onPress: () => router.back() }]
+                            );
+                            setIsLoading(false);
+                        }
+                        return;
+                    }
+                }
+
+                logWithTag("LOCATION", "Récupération de la position initiale...");
+
+                // Obtenir la position initiale avec un timeout pour éviter les blocages
+                let initialLocation: Location.LocationObject | null = null;
+                try {
+                    // Utiliser Promise.race pour ajouter un timeout
+                    const locationPromise = Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.BestForNavigation,
+                        timeout: 15000, // 15 secondes de timeout
+                    });
+
+                    const timeoutPromise = new Promise<never>((_, reject) => {
+                        setTimeout(() => reject(new Error("Timeout")), 15000);
+                    });
+
+                    initialLocation = await Promise.race([locationPromise, timeoutPromise]);
+                } catch (locationError: any) {
+                    logError("[LOCATION] Erreur lors de la récupération de la position initiale:", locationError);
+                    
+                    // Si c'est un timeout, essayer avec une précision moindre
+                    if (locationError?.message === "Timeout" || locationError?.code === "TIMEOUT") {
+                        logWithTag("LOCATION", "Timeout, tentative avec précision réduite...");
+                        try {
+                            initialLocation = await Location.getCurrentPositionAsync({
+                                accuracy: Location.Accuracy.Balanced,
+                                timeout: 10000,
+                            });
+                        } catch (retryError) {
+                            logError("[LOCATION] Erreur lors de la deuxième tentative:", retryError);
+                            if (isMounted) {
+                                Alert.alert(
+                                    "Impossible d'obtenir la position",
+                                    "Vérifiez que votre GPS est activé et que vous êtes dans une zone avec une bonne réception.",
+                                    [{ text: "OK", onPress: () => router.back() }]
+                                );
+                                setIsLoading(false);
+                            }
+                            return;
+                        }
+                    } else {
+                        if (isMounted) {
+                            Alert.alert(
+                                "Erreur de localisation",
+                                "Une erreur est survenue lors de l'accès à la localisation. Veuillez réessayer.",
+                                [{ text: "OK", onPress: () => router.back() }]
+                            );
+                            setIsLoading(false);
+                        }
+                        return;
+                    }
+                }
+
+                if (!initialLocation || !isMounted) {
                     if (isMounted) setIsLoading(false);
                     return;
                 }
 
-                logWithTag("LOCATION", "Permission accordée, récupération de la position...");
+                const { latitude, longitude, heading, speed, accuracy } = initialLocation.coords;
 
-                // Obtenir la position initiale
-                const initialLocation = await Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.BestForNavigation,
+                // Vérifier que les coordonnées sont valides
+                if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+                    logError("[LOCATION] Coordonnées invalides:", { latitude, longitude });
+                    if (isMounted) {
+                        Alert.alert(
+                            "Position invalide",
+                            "Impossible d'obtenir une position valide. Veuillez réessayer.",
+                            [{ text: "OK", onPress: () => router.back() }]
+                        );
+                        setIsLoading(false);
+                    }
+                    return;
+                }
+
+                logWithTag("LOCATION", "Position initiale obtenue:", {
+                    latitude: latitude.toFixed(6),
+                    longitude: longitude.toFixed(6),
+                    accuracy: accuracy?.toFixed(2),
                 });
 
                 if (isMounted) {
-                    const { latitude, longitude, heading, speed, accuracy } =
-                        initialLocation.coords;
-
-                    logWithTag("LOCATION", "Position initiale obtenue:", {
-                        latitude: latitude.toFixed(6),
-                        longitude: longitude.toFixed(6),
-                        accuracy: accuracy?.toFixed(2),
-                    });
-
                     setCurrentUserLocation((prev) => ({
                         ...prev,
                         latitude,
                         longitude,
-                        heading,
-                        speed,
-                        accuracy,
+                        heading: heading ?? null,
+                        speed: speed ?? null,
+                        accuracy: accuracy ?? null,
                     }));
 
                     previousLocationRef.current = {
@@ -441,17 +551,24 @@ export default function TrackRouteScreen() {
 
                     // Centrer la carte sur la position obtenue
                     setTimeout(() => {
-                        if (mapViewRef.current) {
-                            mapViewRef.current.animateToRegion(
-                                {
-                                    latitude,
-                                    longitude,
-                                    latitudeDelta: DEFAULT_LATITUDE_DELTA,
-                                    longitudeDelta: defaultLongitudeDelta,
-                                },
-                                500
-                            );
-                            logWithTag("MAP", "Carte centrée sur la position initiale");
+                        if (mapViewRef.current && isMounted) {
+                            // Vérifier que les valeurs sont valides
+                            if (!isNaN(latitude) && !isNaN(longitude) && isFinite(latitude) && isFinite(longitude)) {
+                                try {
+                                    mapViewRef.current.animateToRegion(
+                                        {
+                                            latitude,
+                                            longitude,
+                                            latitudeDelta: DEFAULT_LATITUDE_DELTA,
+                                            longitudeDelta: defaultLongitudeDelta,
+                                        },
+                                        500
+                                    );
+                                    logWithTag("MAP", "Carte centrée sur la position initiale");
+                                } catch (error) {
+                                    logError("[MAP] Erreur lors du centrage initial:", error);
+                                }
+                            }
                         }
                     }, 100);
 
@@ -463,24 +580,43 @@ export default function TrackRouteScreen() {
                 logWithTag("LOCATION", "Démarrage du suivi en temps réel...");
 
                 // Démarre le suivi de position en temps réel
-                const watcher = await Location.watchPositionAsync(
-                    LOCATION_CONFIG,
-                    (location) => {
-                        if (!isMounted) return;
-                        handleLocationUpdate(location);
-                    }
-                );
+                try {
+                    const watcher = await Location.watchPositionAsync(
+                        LOCATION_CONFIG,
+                        (location) => {
+                            if (!isMounted) return;
+                            handleLocationUpdate(location);
+                        }
+                    );
 
-                locationWatcherRef.current = watcher;
-                logWithTag("LOCATION", "Suivi de position démarré");
+                    if (isMounted) {
+                        locationWatcherRef.current = watcher;
+                        logWithTag("LOCATION", "Suivi de position démarré");
+                    } else {
+                        // Si le composant est démonté, arrêter le watcher
+                        watcher.remove();
+                    }
+                } catch (watchError) {
+                    logError("[LOCATION] Erreur lors du démarrage du suivi:", watchError);
+                    if (isMounted) {
+                        Alert.alert(
+                            "Erreur",
+                            "Impossible de démarrer le suivi de position. Veuillez réessayer.",
+                            [{ text: "OK" }]
+                        );
+                        setIsLoading(false);
+                    }
+                }
             } catch (error) {
                 logError("[LOCATION] Erreur lors de l'initialisation:", error);
-                Alert.alert(
-                    "Erreur",
-                    "Une erreur est survenue lors de l'accès à la localisation.",
-                    [{ text: "OK", onPress: () => router.back() }]
-                );
-                if (isMounted) setIsLoading(false);
+                if (isMounted) {
+                    Alert.alert(
+                        "Erreur",
+                        "Une erreur est survenue lors de l'accès à la localisation. Veuillez réessayer.",
+                        [{ text: "OK", onPress: () => router.back() }]
+                    );
+                    setIsLoading(false);
+                }
             }
         };
 
@@ -490,30 +626,46 @@ export default function TrackRouteScreen() {
             isMounted = false;
             stopTracking();
         };
-    }, [stopTracking, handleLocationUpdate]);
+    }, [stopTracking, handleLocationUpdate, defaultLongitudeDelta]);
 
     /**
      * Centre la carte sur la position actuelle
      */
     const getCurrentLocation = useCallback(() => {
+        if (!mapViewRef.current) return;
+        
         isUserInteractingRef.current = false;
         lastCameraUpdateRef.current = 0;
 
-        mapViewRef.current?.animateToRegion(
-            {
-                latitude: currentUserLocation.latitude,
-                longitude: currentUserLocation.longitude,
-                latitudeDelta: zoomRef.current.latitudeDelta,
-                longitudeDelta: zoomRef.current.longitudeDelta,
-            },
-            300
-        );
+        const { latitude, longitude } = currentUserLocation;
+        
+        // Vérifier que les valeurs sont valides
+        if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+            logWithTag("MAP", "Position invalide, centrage ignoré");
+            return;
+        }
+
+        try {
+            mapViewRef.current.animateToRegion(
+                {
+                    latitude,
+                    longitude,
+                    latitudeDelta: zoomRef.current.latitudeDelta,
+                    longitudeDelta: zoomRef.current.longitudeDelta,
+                },
+                300
+            );
+        } catch (error) {
+            logError("[MAP] Erreur lors du centrage:", error);
+        }
     }, [currentUserLocation.latitude, currentUserLocation.longitude]);
 
     /**
      * Zoom avant
      */
     const zoomIn = useCallback(() => {
+        if (!mapViewRef.current) return;
+        
         isUserInteractingRef.current = true;
 
         const newLatDelta = zoomRef.current.latitudeDelta / 2;
@@ -524,15 +676,26 @@ export default function TrackRouteScreen() {
             longitudeDelta: newLngDelta,
         };
 
-        mapViewRef.current?.animateToRegion(
-            {
-                latitude: currentUserLocation.latitude,
-                longitude: currentUserLocation.longitude,
-                latitudeDelta: newLatDelta,
-                longitudeDelta: newLngDelta,
-            },
-            200
-        );
+        const { latitude, longitude } = currentUserLocation;
+        
+        // Vérifier que les valeurs sont valides
+        if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+            return;
+        }
+
+        try {
+            mapViewRef.current.animateToRegion(
+                {
+                    latitude,
+                    longitude,
+                    latitudeDelta: newLatDelta,
+                    longitudeDelta: newLngDelta,
+                },
+                200
+            );
+        } catch (error) {
+            logError("[MAP] Erreur lors du zoom avant:", error);
+        }
 
         setTimeout(() => {
             isUserInteractingRef.current = false;
@@ -543,6 +706,8 @@ export default function TrackRouteScreen() {
      * Zoom arrière
      */
     const zoomOut = useCallback(() => {
+        if (!mapViewRef.current) return;
+        
         isUserInteractingRef.current = true;
 
         const newLatDelta = zoomRef.current.latitudeDelta * 1.5;
@@ -553,15 +718,26 @@ export default function TrackRouteScreen() {
             longitudeDelta: newLngDelta,
         };
 
-        mapViewRef.current?.animateToRegion(
-            {
-                latitude: currentUserLocation.latitude,
-                longitude: currentUserLocation.longitude,
-                latitudeDelta: newLatDelta,
-                longitudeDelta: newLngDelta,
-            },
-            200
-        );
+        const { latitude, longitude } = currentUserLocation;
+        
+        // Vérifier que les valeurs sont valides
+        if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+            return;
+        }
+
+        try {
+            mapViewRef.current.animateToRegion(
+                {
+                    latitude,
+                    longitude,
+                    latitudeDelta: newLatDelta,
+                    longitudeDelta: newLngDelta,
+                },
+                200
+            );
+        } catch (error) {
+            logError("[MAP] Erreur lors du zoom arrière:", error);
+        }
 
         setTimeout(() => {
             isUserInteractingRef.current = false;
@@ -572,19 +748,32 @@ export default function TrackRouteScreen() {
      * Réinitialise le zoom
      */
     const resetZoom = useCallback(() => {
+        if (!mapViewRef.current) return;
+        
         isUserInteractingRef.current = false;
         lastCameraUpdateRef.current = 0;
 
-        mapViewRef.current?.animateCamera({
-            center: {
-                latitude: currentUserLocation.latitude,
-                longitude: currentUserLocation.longitude,
-            },
-            pitch: 0,
-            heading: 0,
-            altitude: 1000,
-            zoom: 15,
-        });
+        const { latitude, longitude } = currentUserLocation;
+        
+        // Vérifier que les valeurs sont valides
+        if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+            return;
+        }
+
+        try {
+            mapViewRef.current.animateCamera({
+                center: {
+                    latitude,
+                    longitude,
+                },
+                pitch: 0,
+                heading: 0,
+                altitude: 1000,
+                zoom: 15,
+            });
+        } catch (error) {
+            logError("[MAP] Erreur lors de la réinitialisation du zoom:", error);
+        }
     }, [currentUserLocation.latitude, currentUserLocation.longitude]);
 
     /**
@@ -623,22 +812,36 @@ export default function TrackRouteScreen() {
      */
     const handleMapLoaded = useCallback(() => {
         logWithTag("MAP", "Carte chargée");
+        
+        if (!mapViewRef.current) return;
+        
         // Ne centrer que si on a une position réelle (pas la position par défaut)
         const isDefaultLocation = 
             currentUserLocation.latitude === defaultLocation.latitude &&
             currentUserLocation.longitude === defaultLocation.longitude;
         
         if (!isDefaultLocation && !isLoading) {
-            mapViewRef.current?.animateCamera({
-                center: {
-                    latitude: currentUserLocation.latitude,
-                    longitude: currentUserLocation.longitude,
-                },
-                pitch: 0,
-                heading: currentUserLocation.heading || 0,
-                altitude: 1000,
-                zoom: 15,
-            });
+            const { latitude, longitude, heading } = currentUserLocation;
+            
+            // Vérifier que les valeurs sont valides
+            if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+                return;
+            }
+
+            try {
+                mapViewRef.current.animateCamera({
+                    center: {
+                        latitude,
+                        longitude,
+                    },
+                    pitch: 0,
+                    heading: heading || 0,
+                    altitude: 1000,
+                    zoom: 15,
+                });
+            } catch (error) {
+                logError("[MAP] Erreur lors du chargement de la carte:", error);
+            }
         }
     }, [currentUserLocation.latitude, currentUserLocation.longitude, currentUserLocation.heading, defaultLocation.latitude, defaultLocation.longitude, isLoading]);
 
@@ -653,18 +856,31 @@ export default function TrackRouteScreen() {
                 currentUserLocation.longitude === defaultLocation.longitude;
             
             if (!isDefaultLocation) {
+                const { latitude, longitude } = currentUserLocation;
+                
+                // Vérifier que les valeurs sont valides
+                if (isNaN(latitude) || isNaN(longitude) || !isFinite(latitude) || !isFinite(longitude)) {
+                    return;
+                }
+
                 // Attendre un peu pour s'assurer que la carte est prête
                 const timer = setTimeout(() => {
-                    mapViewRef.current?.animateToRegion(
-                        {
-                            latitude: currentUserLocation.latitude,
-                            longitude: currentUserLocation.longitude,
-                            latitudeDelta: DEFAULT_LATITUDE_DELTA,
-                            longitudeDelta: defaultLongitudeDelta,
-                        },
-                        500
-                    );
-                    logWithTag("MAP", "Carte centrée automatiquement sur la position");
+                    if (mapViewRef.current) {
+                        try {
+                            mapViewRef.current.animateToRegion(
+                                {
+                                    latitude,
+                                    longitude,
+                                    latitudeDelta: DEFAULT_LATITUDE_DELTA,
+                                    longitudeDelta: defaultLongitudeDelta,
+                                },
+                                500
+                            );
+                            logWithTag("MAP", "Carte centrée automatiquement sur la position");
+                        } catch (error) {
+                            logError("[MAP] Erreur lors du centrage automatique:", error);
+                        }
+                    }
                 }, 300);
 
                 return () => clearTimeout(timer);
@@ -685,9 +901,13 @@ export default function TrackRouteScreen() {
             lastCameraUpdateRef.current = 0;
             // Centrer la carte sur la position actuelle
             if (mapViewRef.current && currentUserLocation) {
-                setTimeout(() => {
-                    getCurrentLocation();
-                }, 300);
+                const { latitude, longitude } = currentUserLocation;
+                // Vérifier que les valeurs sont valides avant de centrer
+                if (!isNaN(latitude) && !isNaN(longitude) && isFinite(latitude) && isFinite(longitude)) {
+                    setTimeout(() => {
+                        getCurrentLocation();
+                    }, 300);
+                }
             }
         }
     }, [isDeparted, isRouteStarted, currentUserLocation, getCurrentLocation]);
@@ -1107,7 +1327,12 @@ export default function TrackRouteScreen() {
                 <MapView
                     ref={mapViewRef}
                     style={styles.map}
-                    initialRegion={currentUserLocation}
+                    initialRegion={{
+                        latitude: currentUserLocation.latitude,
+                        longitude: currentUserLocation.longitude,
+                        latitudeDelta: currentUserLocation.latitudeDelta || DEFAULT_LATITUDE_DELTA,
+                        longitudeDelta: currentUserLocation.longitudeDelta || defaultLongitudeDelta,
+                    }}
                     showsUserLocation={false}
                     showsMyLocationButton={false}
                     showsCompass={false}
@@ -1118,6 +1343,9 @@ export default function TrackRouteScreen() {
                     onRegionChange={handleRegionChange}
                     onRegionChangeStart={handleRegionChangeStart}
                     onRegionChangeComplete={handleRegionChangeComplete}
+                    // Propriétés spécifiques Android pour éviter les crashes
+                    loadingEnabled={Platform.OS === "android"}
+                    mapType={Platform.OS === "android" ? "standard" : undefined}
                 >
                     <UserMarker
                         region={currentUserLocation}

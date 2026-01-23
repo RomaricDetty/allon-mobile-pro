@@ -155,88 +155,28 @@ export default function DepartureDetailsScreen() {
 
     /**
      * Gère l'action du bouton de démarrage du trajet
-     * Affiche une alerte de confirmation pour le partage de position géographique
-     * L'alerte ne s'affiche qu'une seule fois par trajet
-    */
+     * Redirige directement vers l'écran de suivi de trajet après vérification des permissions
+     */
     const handleStartTraject = async () => {
-        // Crée une clé unique pour ce trajet basée sur l'ID du départ
-        const trajectoryAlertKey = `trajectory_alert_${departure.id}`;
-
-
         try {
-
             const userRole = await AsyncStorage.getItem('user_role');
             console.log('userRole ===>, ', userRole);
+            
             if (userRole?.toUpperCase() !== 'DRIVER' && userRole?.toUpperCase() !== 'SUPERVISOR') {
                 Alert.alert('Erreur', 'Vous n\'avez pas les permissions requises pour démarrer le trajet.');
                 return;
             }
-            // Vérifie si l'alerte a déjà été affichée pour ce trajet
-            const alertAlreadyShown = await AsyncStorage.getItem(trajectoryAlertKey);
 
-            if (alertAlreadyShown === 'true') {
-                // Si l'alerte a déjà été affichée, rediriger directement
-                router.push({
-                    pathname: '/track-route',
-                    params: {
-                        departure: JSON.stringify(departure),
-                    },
-                });
-                return;
-            }
-
-            // Si l'alerte n'a pas encore été affichée, l'afficher
-            Alert.alert(
-                'Démarrer le trajet',
-                'Vous êtes sur le point de démarrer le trajet. En confirmant, vous acceptez de partager votre position géographique en temps réel pour permettre aux usagers de voir votre position sur la carte.',
-                [
-                    {
-                        text: 'Annuler',
-                        style: 'cancel',
-                    },
-                    {
-                        text: 'Confirmer',
-                        onPress: async () => {
-                            // Stocke l'information que l'alerte a été affichée pour ce trajet
-                            await AsyncStorage.setItem(trajectoryAlertKey, 'true');
-
-                            // Redirige vers l'écran de suivi de trajet avec les données du départ
-                            router.push({
-                                pathname: '/track-route',
-                                params: {
-                                    departure: JSON.stringify(departure),
-                                },
-                            });
-                        },
-                    },
-                ],
-                { cancelable: true }
-            );
+            // Redirige vers l'écran de suivi de trajet
+            router.push({
+                pathname: '/track-route',
+                params: {
+                    departure: JSON.stringify(departure),
+                },
+            });
         } catch (error) {
-            console.error('Erreur lors de la vérification de l\'alerte:', error);
-            // En cas d'erreur, afficher l'alerte par défaut
-            Alert.alert(
-                'Démarrer le trajet',
-                'Vous êtes sur le point de démarrer le trajet. En confirmant, vous acceptez de partager votre position géographique en temps réel pour permettre aux usagers de voir votre position sur la carte.',
-                [
-                    {
-                        text: 'Annuler',
-                        style: 'cancel',
-                    },
-                    {
-                        text: 'Confirmer',
-                        onPress: () => {
-                            router.push({
-                                pathname: '/track-route',
-                                params: {
-                                    departure: JSON.stringify(departure),
-                                },
-                            });
-                        },
-                    },
-                ],
-                { cancelable: true }
-            );
+            console.error('Erreur lors du démarrage du trajet:', error);
+            Alert.alert('Erreur', 'Une erreur est survenue lors du démarrage du trajet. Veuillez réessayer.');
         }
     };
 

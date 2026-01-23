@@ -1,5 +1,6 @@
 //@ts-nocheck
 import { processScanApi, verifyQRCode } from '@/api/departures';
+import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -18,7 +19,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { MaterialIcons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SCAN_AREA_SIZE = 280;
@@ -332,6 +332,8 @@ const ScanQRScreen = () => {
             console.log('[PROCESS] Traitement du scan...', { retry: retryCount });
             const response = await withTimeout(processScanApi(validationData, token));
 
+            console.log('response dans le processScan : ', JSON.stringify(response));
+
             if (response?.data) {
                 console.log('[PROCESS] Scan traité avec succès');
                 
@@ -350,22 +352,22 @@ const ScanQRScreen = () => {
                 const departureId = departure?.id;
 
                 // Vérification de correspondance des IDs
-                // if (departureId && bookingDepartureId && departureId !== bookingDepartureId) {
-                //     console.log('[PROCESS] Les IDs ne correspondent pas:', {
-                //         expected: departureId,
-                //         received: bookingDepartureId
-                //     });
+                if (departureId && bookingDepartureId && departureId !== bookingDepartureId) {
+                    console.log('[PROCESS] Les IDs ne correspondent pas:', {
+                        expected: departureId,
+                        received: bookingDepartureId
+                    });
                     
-                //     await triggerHapticFeedback('error');
-                //     setLoadingScanProcess(false);
+                    await triggerHapticFeedback('error');
+                    setLoadingScanProcess(false);
                     
-                //     Alert.alert(
-                //         'Ticket invalide',
-                //         'Ce ticket ne correspond pas au départ sélectionné. Veuillez scanner un ticket valide pour ce trajet.',
-                //         [{ text: 'OK', onPress: resetScan }]
-                //     );
-                //     return;
-                // }
+                    Alert.alert(
+                        'Ticket invalide',
+                        'Ce ticket ne correspond pas au départ sélectionné. Veuillez scanner un ticket valide pour ce trajet.',
+                        [{ text: 'OK', onPress: resetScan }]
+                    );
+                    return;
+                }
 
                 // Si tout est OK, on continue avec la redirection
                 await triggerHapticFeedback('success');
@@ -379,7 +381,13 @@ const ScanQRScreen = () => {
                     },
                 });
             } else {
-                throw new Error('Réponse invalide du serveur');
+                // throw new Error('Réponse invalide du serveur');
+                Alert.alert(
+                    'Erreur',
+                    response?.data?.message || response?.data?.error || 'Une erreur est survenue lors du traitement du scan. Veuillez réessayer.',
+                    [{ text: 'OK' }]
+                );
+                return;
             }
         } catch (error: any) {
             console.error('[PROCESS] Erreur traitement scan:', error.message || error);
