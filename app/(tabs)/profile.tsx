@@ -156,7 +156,12 @@ export default function ProfileScreen() {
 
             <ScrollView
                 style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    {
+                        paddingBottom: 70,
+                    }
+                ]}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Section Informations du profil */}
@@ -395,7 +400,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     scrollView: {
-        flex: 1,
+        flex: 1
     },
     scrollContent: {
         padding: 16,
