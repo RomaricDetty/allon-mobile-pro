@@ -122,7 +122,7 @@ export default function DepartureDetailsScreen() {
             const userRole = await AsyncStorage.getItem('user_role');
             console.log('userRole ===>, ', userRole);
 
-            if (userRole?.toUpperCase() !== 'DRIVER' && userRole?.toUpperCase() !== 'SUPERVISOR') {
+            if (userRole?.toUpperCase() !== 'DRIVER' && userRole?.toUpperCase() !== 'DEPARTURE_SUPERVISOR') {
                 Alert.alert('Erreur', 'Vous n\'avez pas les permissions requises pour démarrer le trajet.');
                 return;
             }
@@ -264,7 +264,7 @@ export default function DepartureDetailsScreen() {
     };
 
     // Détermine si on doit afficher le bouton de démarrage du trajet
-    const showStartTrajectButton = userRole?.toUpperCase() === 'DRIVER' || userRole?.toUpperCase() === 'SUPERVISOR';
+    const showStartTrajectButton = userRole?.toUpperCase() === 'DRIVER' || userRole?.toUpperCase() === 'DEPARTURE_SUPERVISOR';
 
     return (
         <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#F3F3F7' }]}>

@@ -1,14 +1,14 @@
 import { baseUrl } from '@/api/config';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { styles } from '@/styles/scan-result';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
 /**
  * Interface pour les données de réservation
  */
@@ -210,16 +210,22 @@ export default function ScanResultScreen() {
 
     const { booking } = bookingData;
 
-    // Couleurs pour le mode clair et sombre
-    const headerBackgroundColor = isDark ? '#1A1A1A' : '#1776BA';
-    const cardBackgroundColor = isDark ? '#1A1A1A' : '#FFFFFF';
-    const primaryTextColor = isDark ? '#FFFFFF' : '#11181C';
-    const secondaryTextColor = isDark ? '#9BA1A6' : '#666666';
-    const labelTextColor = isDark ? '#9BA1A6' : '#999999';
-    const borderColor = isDark ? '#3A3A3C' : '#E0E0E0';
-    const separatorColor = isDark ? '#3A3A3C' : '#E5E5E5';
-    const successColor = '#34C759';
-    const warningColor = '#FF9500'; // Nouvelle couleur pour les avertissements
+    /**
+     * Couleurs pour le mode clair et sombre
+     */
+    const colors = React.useMemo(() => ({
+        headerBg: isDark ? '#1A1A1A' : '#1776BA',
+        cardBg: isDark ? '#1A1A1A' : '#FFFFFF',
+        primaryText: isDark ? '#FFFFFF' : '#11181C',
+        secondaryText: isDark ? '#9BA1A6' : '#666666',
+        labelText: isDark ? '#9BA1A6' : '#999999',
+        border: isDark ? '#3A3A3C' : '#E0E0E0',
+        separator: isDark ? '#3A3A3C' : '#E5E5E5',
+        success: '#34C759',
+        warning: '#FF9500',
+        itemCardBg: isDark ? '#2A2A2A' : '#F5F5F5',
+        codeContainerBg: isDark ? '#2A2A2A' : '#F5F5F5',
+    }), [isDark]);
 
     /**
      * Gère le retour à l'écran précédent
@@ -230,16 +236,11 @@ export default function ScanResultScreen() {
 
     /**
      * Bascule la sélection d'un billet
-     * @param itemId - L'ID du billet à sélectionner/désélectionner
      */
     const toggleItemSelection = (itemId: string) => {
         setSelectedItems(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(itemId)) {
-                newSet.delete(itemId);
-            } else {
-                newSet.add(itemId);
-            }
+            newSet.has(itemId) ? newSet.delete(itemId) : newSet.add(itemId);
             return newSet;
         });
     };
@@ -343,37 +344,20 @@ export default function ScanResultScreen() {
     };
 
     /**
-     * Vérifie si tous les billets de la réservation ont le statut USED
-     * @returns true si tous les billets ont le statut USED
+     * Vérifie si tous les billets ont le statut USED
      */
-    const areAllItemsUsed = (): boolean => {
-        if (!booking.items || booking.items.length === 0) {
-            return false;
-        }
-
-        // Vérifie si tous les éléments ont le statut USED
-        return booking.items.every((item: any) => {
-            const status = item.status?.toUpperCase();
-            return status === 'USED';
-        });
-    };
+    const areAllItemsUsed = React.useMemo(() => 
+        booking.items?.every((item: any) => item.status?.toUpperCase() === 'USED') ?? false,
+        [booking.items]
+    );
 
     /**
-     * Calcule le nombre de billets qui n'ont pas encore le statut USED
-     * @returns Le nombre de billets restants à valider
+     * Calcule le nombre de billets restants à valider
      */
-    const getRemainingItemsCount = (): number => {
-        if (!booking.items || booking.items.length === 0) {
-            return 0;
-        }
-
-        const unusedItems = booking.items.filter((item: any) => {
-            const status = item.status?.toUpperCase();
-            return status !== 'USED';
-        });
-
-        return unusedItems.length;
-    };
+    const remainingItemsCount = React.useMemo(() => 
+        booking.items?.filter((item: any) => item.status?.toUpperCase() !== 'USED').length ?? 0,
+        [booking.items]
+    );
 
     useEffect(() => {
         const checkUserRole = async () => {
@@ -385,7 +369,7 @@ export default function ScanResultScreen() {
     }, []);
 
     // Détermine si l'utilisateur peut valider les billets
-    const canValidateTickets = userRole === 'DRIVER' || userRole === 'SUPERVISOR';
+    const canValidateTickets = userRole === 'DRIVER' || userRole === 'DEPARTURE_SUPERVISOR';
     
     // Détermine si on doit afficher le bouton bagages
     const showBaggageButton = userRole === 'PORTER';
@@ -421,16 +405,7 @@ export default function ScanResultScreen() {
     return (
         <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#F3F3F7' }]}>
             {/* Barre de navigation / En-tête */}
-            <View
-                style={[
-                    styles.header,
-                    {
-                        backgroundColor: headerBackgroundColor,
-                        paddingTop: insets.top + 8,
-                        paddingBottom: 16,
-                    },
-                ]}
-            >
+            <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: insets.top + 8, paddingBottom: 16 }]}>
                 <View style={styles.headerContent}>
                     <TouchableOpacity
                         style={[styles.headerButton, { backgroundColor: 'rgba(255, 255, 255, 0.2)' }]}
@@ -456,189 +431,109 @@ export default function ScanResultScreen() {
                 showsVerticalScrollIndicator={false}
             >
                 {/* Carte principale */}
-                <View
-                    style={[
-                        styles.card,
-                        {
-                            backgroundColor: cardBackgroundColor,
-                            borderColor: borderColor,
-                        },
-                    ]}
-                >
-                    {/* Section de succès - Tous les billets validés */}
-                    {areAllItemsUsed() && (
+                <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+                    {/* Section de succès/information */}
+                    {areAllItemsUsed ? (
                         <>
                             <View style={styles.successSection}>
-                                <View style={[styles.successIconContainer, { backgroundColor: successColor + '20' }]}>
-                                    <MaterialIcons name="check-circle" size={48} color={successColor} />
+                                <View style={[styles.successIconContainer, { backgroundColor: colors.success + '20' }]}>
+                                    <MaterialIcons name="check-circle" size={48} color={colors.success} />
                                 </View>
-                                <ThemedText style={[styles.successTitle, { color: primaryTextColor }]}>
-                                    Scan validé avec succès
-                                </ThemedText>
-                                <ThemedText style={[styles.successSubtitle, { color: secondaryTextColor }]}>
-                                    Tous les billets de la réservation ont été validés
-                                </ThemedText>
+                                <ThemedText style={[styles.successTitle, { color: colors.primaryText }]}>Scan validé avec succès</ThemedText>
+                                <ThemedText style={[styles.successSubtitle, { color: colors.secondaryText }]}>Tous les billets de la réservation ont été validés</ThemedText>
                             </View>
-                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                            <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                         </>
-                    )}
-
-                    {/* Section d'information - Billets non encore tous validés */}
-                    {!areAllItemsUsed() && (
+                    ) : (
                         <>
                             <View style={styles.infoSection}>
-                                <View style={[styles.infoIconContainer, { backgroundColor: warningColor + '20' }]}>
-                                    <MaterialIcons name="info" size={48} color={warningColor} />
+                                <View style={[styles.infoIconContainer, { backgroundColor: colors.warning + '20' }]}>
+                                    <MaterialIcons name="info" size={48} color={colors.warning} />
                                 </View>
-                                <ThemedText style={[styles.infoTitle, { color: primaryTextColor }]}>
-                                    Réservation à valider
-                                </ThemedText>
-                                <ThemedText style={[styles.infoSubtitle, { color: secondaryTextColor }]}>
-                                    {getRemainingItemsCount() > 0 
-                                        ? `${getRemainingItemsCount()} billet${getRemainingItemsCount() > 1 ? 's' : ''} restant${getRemainingItemsCount() > 1 ? 's' : ''} à valider`
-                                        : 'En attente de validation'
-                                    }
+                                <ThemedText style={[styles.infoTitle, { color: colors.primaryText }]}>Réservation à valider</ThemedText>
+                                <ThemedText style={[styles.infoSubtitle, { color: colors.secondaryText }]}>
+                                    {remainingItemsCount > 0 ? `${remainingItemsCount} billet${remainingItemsCount > 1 ? 's' : ''} restant${remainingItemsCount > 1 ? 's' : ''} à valider` : 'En attente de validation'}
                                 </ThemedText>
                             </View>
-                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                            <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                         </>
                     )}
 
                     {/* Section : Code de réservation */}
                     <View style={styles.section}>
-                        <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
-                            Code de réservation
-                        </ThemedText>
-                        <View style={[styles.codeContainer, { backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5', borderColor: borderColor }]}>
-                            <ThemedText style={[styles.codeText, { color: primaryTextColor }]}>
-                                {booking.code || '--'}
-                            </ThemedText>
+                        <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>Code de réservation</ThemedText>
+                        <View style={[styles.codeContainer, { backgroundColor: colors.codeContainerBg, borderColor: colors.border }]}>
+                            <ThemedText style={[styles.codeText, { color: colors.primaryText }]}>{booking.code || '--'}</ThemedText>
                         </View>
                     </View>
-
-                    {/* Séparateur */}
-                    <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                    <View style={[styles.separator, { backgroundColor: colors.separator }]} />
 
                     {/* Section : Statut de la réservation */}
                     <View style={styles.section}>
-                        <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
-                            Statut de la réservation
-                        </ThemedText>
+                        <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>Statut de la réservation</ThemedText>
                         <View style={styles.statusRow}>
-                            <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                Statut
-                            </ThemedText>
+                            <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Statut</ThemedText>
                             <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status, isDark) + '20' }]}>
-                                <ThemedText style={[styles.statusText, { color: getStatusColor(booking.status, isDark) }]}>
-                                    {getStatusLabel(booking.status)}
-                                </ThemedText>
+                                <ThemedText style={[styles.statusText, { color: getStatusColor(booking.status, isDark) }]}>{getStatusLabel(booking.status)}</ThemedText>
                             </View>
                         </View>
                     </View>
-
-                    {/* Séparateur */}
-                    <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                    <View style={[styles.separator, { backgroundColor: colors.separator }]} />
 
                     {/* Section : Détails du départ */}
                     {booking.departure && (
                         <>
                             <View style={styles.section}>
-                                <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
-                                    Détails du départ
-                                </ThemedText>
-                                
+                                <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>Détails du départ</ThemedText>
+                                {[
+                                    { label: 'Date', value: formatDate(booking.departure.departureDateTime) },
+                                    { label: 'Heure', value: formatTime(booking.departure.departureDateTime) },
+                                ].map(({ label, value }) => (
+                                    <View key={label} style={styles.detailRow}>
+                                        <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>{label}</ThemedText>
+                                        <ThemedText style={[styles.detailValue, { color: colors.primaryText }]}>{value}</ThemedText>
+                                    </View>
+                                ))}
                                 <View style={styles.detailRow}>
-                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                        Date
-                                    </ThemedText>
-                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                        {formatDate(booking.departure.departureDateTime)}
-                                    </ThemedText>
-                                </View>
-
-                                <View style={styles.detailRow}>
-                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                        Heure
-                                    </ThemedText>
-                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                        {formatTime(booking.departure.departureDateTime)}
-                                    </ThemedText>
-                                </View>
-
-                                <View style={styles.detailRow}>
-                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                        Statut du départ
-                                    </ThemedText>
+                                    <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Statut du départ</ThemedText>
                                     <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.departure.status, isDark) + '20' }]}>
-                                        <ThemedText style={[styles.statusText, { color: getStatusColor(booking.departure.status, isDark) }]}>
-                                            {getStatusLabel(booking.departure.status)}
-                                        </ThemedText>
+                                        <ThemedText style={[styles.statusText, { color: getStatusColor(booking.departure.status, isDark) }]}>{getStatusLabel(booking.departure.status)}</ThemedText>
                                     </View>
                                 </View>
                             </View>
-
-                            {/* Séparateur */}
-                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                            <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                         </>
                     )}
 
                     {/* Section : Résumé */}
                     {booking.summary && (
                         <View style={styles.section}>
-                            <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
-                                Résumé
-                            </ThemedText>
-                            
+                            <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>Résumé</ThemedText>
+                            {[
+                                { label: 'Total des billets', value: booking.summary.totalItems || 0 },
+                                { label: 'Billets payés', value: booking.summary.paidItems || 0 },
+                                { label: 'Billets utilisés', value: booking.summary.usedItems || 0 },
+                            ].map(({ label, value }) => (
+                                <View key={label} style={styles.detailRow}>
+                                    <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>{label}</ThemedText>
+                                    <ThemedText style={[styles.detailValue, { color: colors.primaryText }]}>{value}</ThemedText>
+                                </View>
+                            ))}
                             <View style={styles.detailRow}>
-                                <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Total des billets
-                                </ThemedText>
-                                <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                    {booking.summary.totalItems || 0}
-                                </ThemedText>
-                            </View>
-
-                            <View style={styles.detailRow}>
-                                <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Billets payés
-                                </ThemedText>
-                                <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                    {booking.summary.paidItems || 0}
-                                </ThemedText>
-                            </View>
-
-                            <View style={styles.detailRow}>
-                                <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Billets utilisés
-                                </ThemedText>
-                                <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                    {booking.summary.usedItems || 0}
-                                </ThemedText>
-                            </View>
-
-                            <View style={styles.detailRow}>
-                                <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                    Validation total des billets
-                                </ThemedText>
-                                <View style={[styles.statusBadge, { backgroundColor: (booking.summary.canValidateAll ? successColor : '#FF9500') + '20' }]}>
-                                    <ThemedText style={[styles.statusText, { color: booking.summary.canValidateAll ? successColor : '#FF9500' }]}>
-                                        {booking.summary.canValidateAll ? 'Oui' : 'Non'}
-                                    </ThemedText>
+                                <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Validation total des billets</ThemedText>
+                                <View style={[styles.statusBadge, { backgroundColor: (booking.summary.canValidateAll ? colors.success : colors.warning) + '20' }]}>
+                                    <ThemedText style={[styles.statusText, { color: booking.summary.canValidateAll ? colors.success : colors.warning }]}>{booking.summary.canValidateAll ? 'Oui' : 'Non'}</ThemedText>
                                 </View>
                             </View>
                         </View>
                     )}
-
-                    {/* Séparateur */}
-                    <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                    <View style={[styles.separator, { backgroundColor: colors.separator }]} />
 
                     {/* Section : Liste des billets */}
-                    {booking.items && booking.items.length > 0 && (
+                    {booking.items?.length > 0 && (
                         <>
                             <View style={styles.section}>
-                                <ThemedText style={[styles.sectionTitle, { color: primaryTextColor }]}>
-                                    Liste des billets ({booking.items.length})
-                                </ThemedText>
+                                <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>Liste des billets ({booking.items.length})</ThemedText>
                                 
                                 {booking.items.map((item: any, index: number) => {
                                     const isSelected = selectedItems.has(item.id);
@@ -650,10 +545,8 @@ export default function ScanResultScreen() {
                                             style={[
                                                 styles.itemCard,
                                                 {
-                                                    backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5',
-                                                    borderColor: isSelected && canSelect 
-                                                        ? '#1776BA' 
-                                                        : borderColor,
+                                                    backgroundColor: colors.itemCardBg,
+                                                    borderColor: isSelected && canSelect ? '#1776BA' : colors.border,
                                                     borderWidth: isSelected && canSelect ? 1 : 0.5,
                                                     opacity: canSelect ? 1 : 0.6,
                                                 },
@@ -675,9 +568,7 @@ export default function ScanResultScreen() {
                                                                     backgroundColor: isSelected 
                                                                         ? '#1776BA' 
                                                                         : 'transparent',
-                                                                    borderColor: isSelected 
-                                                                        ? '#1776BA' 
-                                                                        : borderColor,
+                                                                    borderColor: isSelected ? '#1776BA' : colors.border,
                                                                 },
                                                             ]}
                                                         >
@@ -686,101 +577,40 @@ export default function ScanResultScreen() {
                                                             )}
                                                         </View>
                                                     )}
-                                                    <ThemedText style={[styles.itemTitle, { color: primaryTextColor }]}>
-                                                        Billet #{index + 1}
-                                                    </ThemedText>
+                                                    <ThemedText style={[styles.itemTitle, { color: colors.primaryText }]}>Billet #{index + 1}</ThemedText>
                                                 </View>
                                                 {item.status && (
                                                     <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status, isDark) + '20' }]}>
-                                                        <ThemedText style={[styles.statusText, { color: getStatusColor(item.status, isDark) }]}>
-                                                            {getStatusLabel(item.status)}
-                                                        </ThemedText>
+                                                        <ThemedText style={[styles.statusText, { color: getStatusColor(item.status, isDark) }]}>{getStatusLabel(item.status)}</ThemedText>
                                                     </View>
                                                 )}
                                             </TouchableOpacity>
 
                                             {/* Informations du passager */}
                                             <View style={styles.itemContent}>
+                                                {[
+                                                    { label: 'Passager', value: item.firstName && item.lastName ? `${item.firstName} ${item.lastName}` : '--' },
+                                                    { label: 'Numéro de siège', value: item.seatNumber || '--' },
+                                                    { label: 'Type de passager', value: getPassengerTypeLabel(item.passengerType) },
+                                                    { label: 'Type de trajet', value: getLegLabel(item.leg) },
+                                                ].map(({ label, value }) => (
+                                                    <View key={label} style={styles.detailRow}>
+                                                        <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>{label}</ThemedText>
+                                                        <ThemedText style={[styles.detailValue, { color: colors.primaryText }]}>{value}</ThemedText>
+                                                    </View>
+                                                ))}
                                                 <View style={styles.detailRow}>
-                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                                        Passager
-                                                    </ThemedText>
-                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                                        {item.firstName && item.lastName 
-                                                            ? `${item.firstName} ${item.lastName}`
-                                                            : '--'
-                                                        }
-                                                    </ThemedText>
-                                                </View>
-
-                                                <View style={styles.detailRow}>
-                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                                        Numéro de siège
-                                                    </ThemedText>
-                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                                        {item.seatNumber || '--'}
-                                                    </ThemedText>
-                                                </View>
-
-                                                <View style={styles.detailRow}>
-                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                                        Type de passager
-                                                    </ThemedText>
-                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                                        {getPassengerTypeLabel(item.passengerType)}
-                                                    </ThemedText>
-                                                </View>
-
-                                                <View style={styles.detailRow}>
-                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                                        Type de trajet
-                                                    </ThemedText>
-                                                    <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                                        {getLegLabel(item.leg)}
-                                                    </ThemedText>
-                                                </View>
-
-                                                {/* Checkbox pour la validation */}
-                                                <View style={styles.detailRow}>
-                                                    <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                                        Peut être validé ?
-                                                    </ThemedText>
+                                                    <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Peut être validé ?</ThemedText>
                                                     <View style={styles.checkboxContainer}>
-                                                        {/* <View
-                                                            style={[
-                                                                styles.checkbox,
-                                                                {
-                                                                    backgroundColor: item.canValidate ? '#1776BA' : (isDark ? '#3A3A3C' : '#E0E0E0'),
-                                                                    borderColor: item.canValidate ? '#1776BA' : borderColor,
-                                                                },
-                                                            ]}
-                                                        >
-                                                            {item.canValidate && (
-                                                                <MaterialIcons name="check" size={18} color="#FFFFFF" />
-                                                            )}
-                                                        </View> */}
-                                                        <ThemedText style={[styles.checkboxLabel, { color: primaryTextColor }]}>
-                                                            {item.canValidate ? 'Oui' : 'Non'}
-                                                        </ThemedText>
+                                                        <ThemedText style={[styles.checkboxLabel, { color: colors.primaryText }]}>{item.canValidate ? 'Oui' : 'Non'}</ThemedText>
                                                     </View>
                                                 </View>
 
-                                                {/* Bouton Enregistrer bagages (visible uniquement pour PORTER) */}
                                                 {showBaggageButton && (
-                                                    <View style={[styles.baggageButtonContainer, { borderTopColor: separatorColor }]}>
-                                                        <TouchableOpacity
-                                                            style={[
-                                                                styles.baggageButton,
-                                                                {
-                                                                    backgroundColor: '#1776BA',
-                                                                },
-                                                            ]}
-                                                            onPress={() => handleRegisterBaggage(item.id)}
-                                                        >
+                                                    <View style={[styles.baggageButtonContainer, { borderTopColor: colors.separator }]}>
+                                                        <TouchableOpacity style={[styles.baggageButton, { backgroundColor: '#1776BA' }]} onPress={() => handleRegisterBaggage(item.id)}>
                                                             <MaterialIcons name="luggage" size={20} color="#FFFFFF" />
-                                                            <ThemedText style={styles.baggageButtonText}>
-                                                                Enregistrer bagages
-                                                            </ThemedText>
+                                                            <ThemedText style={styles.baggageButtonText}>Enregistrer bagages</ThemedText>
                                                         </TouchableOpacity>
                                                     </View>
                                                 )}
@@ -790,56 +620,28 @@ export default function ScanResultScreen() {
                                 })}
                             </View>
 
-                            {/* Séparateur */}
-                            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+                            <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                         </>
                     )}
 
                     {/* Section : Type de trajet */}
                     <View style={styles.section}>
                         <View style={styles.detailRow}>
-                            <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
-                                Type de trajet
-                            </ThemedText>
-                            <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
-                                {getTripTypeLabel(booking.tripType)}
-                            </ThemedText>
+                            <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Type de trajet</ThemedText>
+                            <ThemedText style={[styles.detailValue, { color: colors.primaryText }]}>{getTripTypeLabel(booking.tripType)}</ThemedText>
                         </View>
                     </View>
                 </View>
             </ScrollView>
 
-            {/* Bouton de validation fixe en bas (visible uniquement si l'utilisateur peut valider) */}
+            {/* Bouton de validation fixe en bas */}
             {selectedItems.size > 0 && canValidateTickets && (
-                <View
-                    style={[
-                        styles.validationButtonContainer,
-                        {
-                            backgroundColor: cardBackgroundColor,
-                            borderTopColor: borderColor,
-                            paddingBottom: insets.bottom + 16,
-                        },
-                    ]}
-                >
-                    <TouchableOpacity
-                        style={[
-                            styles.validationButton,
-                            {
-                                backgroundColor: '#1776BA',
-                                opacity: isValidating ? 0.6 : 1,
-                            },
-                        ]}
-                        onPress={handleValidateItems}
-                        disabled={isValidating}
-                    >
-                        {isValidating ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                        ) : (
+                <View style={[styles.validationButtonContainer, { backgroundColor: colors.cardBg, borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
+                    <TouchableOpacity style={[styles.validationButton, { backgroundColor: '#1776BA', opacity: isValidating ? 0.6 : 1 }]} onPress={handleValidateItems} disabled={isValidating}>
+                        {isValidating ? <ActivityIndicator color="#FFFFFF" /> : (
                             <>
                                 <MaterialIcons name="check-circle" size={24} color="#FFFFFF" />
-                                <ThemedText style={styles.validationButtonText}>
-                                    Valider {selectedItems.size} billet{selectedItems.size > 1 ? 's' : ''}
-                                </ThemedText>
+                                <ThemedText style={styles.validationButtonText}>Valider {selectedItems.size} billet{selectedItems.size > 1 ? 's' : ''}</ThemedText>
                             </>
                         )}
                     </TouchableOpacity>
@@ -848,240 +650,3 @@ export default function ScanResultScreen() {
         </View>
     );
 }
-
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    header: {
-        paddingHorizontal: 15,
-    },
-    headerContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontFamily: 'Ubuntu_Bold',
-        flex: 1,
-        textAlign: 'center',
-    },
-    scrollView: {
-        flex: 1,
-    },
-    scrollContent: {
-        padding: 10,
-    },
-    card: {
-        borderRadius: 20,
-        padding: 20,
-        borderWidth: 1,
-    },
-    successSection: {
-        alignItems: 'center',
-        paddingVertical: 24,
-    },
-    successIconContainer: {
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    successTitle: {
-        fontSize: 22,
-        fontFamily: 'Ubuntu_Bold',
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    successSubtitle: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Regular',
-        textAlign: 'center',
-    },
-    infoSection: {
-        alignItems: 'center',
-        paddingVertical: 24,
-    },
-    infoIconContainer: {
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    infoTitle: {
-        fontSize: 22,
-        fontFamily: 'Ubuntu_Bold',
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    infoSubtitle: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Regular',
-        textAlign: 'center',
-    },
-    separator: {
-        height: 1,
-        width: '100%',
-        marginVertical: 16,
-    },
-    section: {
-        marginVertical: 8,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontFamily: 'Ubuntu_Bold',
-        marginBottom: 16,
-    },
-    codeContainer: {
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        alignItems: 'center',
-    },
-    codeText: {
-        fontSize: 20,
-        fontFamily: 'Ubuntu_Bold',
-        letterSpacing: 2,
-    },
-    statusRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    statusBadge: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 16,
-    },
-    statusText: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Bold',
-    },
-    detailRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 12,
-    },
-    detailLabel: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Regular',
-    },
-    detailValue: {
-        fontSize: 16,
-        fontFamily: 'Ubuntu_Bold',
-    },
-    itemCard: {
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        marginBottom: 12,
-    },
-    itemHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    itemTitle: {
-        fontSize: 16,
-        fontFamily: 'Ubuntu_Bold',
-    },
-    itemContent: {
-        gap: 8,
-    },
-    checkboxContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    checkbox: {
-        width: 24,
-        height: 24,
-        borderRadius: 6,
-        borderWidth: 2,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    checkboxLabel: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Medium',
-    },
-    itemHeaderLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        flex: 1,
-    },
-    selectionCheckbox: {
-        width: 24,
-        height: 24,
-        borderRadius: 6,
-        borderWidth: 2,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    validationButtonContainer: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        paddingHorizontal: 20,
-        paddingTop: 16,
-        borderTopWidth: 1,
-        // shadowColor: '#000',
-        // shadowOffset: {
-        //     width: 0,
-        //     height: -2,
-        // },
-        // shadowOpacity: 0.1,
-        // shadowRadius: 4,
-        // elevation: 5,
-    },
-    validationButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 24,
-        borderRadius: 12,
-        gap: 8,
-    },
-    validationButtonText: {
-        fontSize: 16,
-        fontFamily: 'Ubuntu_Bold',
-        color: '#FFFFFF',
-    },
-    baggageButtonContainer: {
-        marginTop: 12,
-        paddingTop: 12,
-        borderTopWidth: 1,
-    },
-    baggageButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 8,
-        gap: 8,
-    },
-    baggageButtonText: {
-        fontSize: 14,
-        fontFamily: 'Ubuntu_Bold',
-        color: '#FFFFFF',
-    },
-});
-

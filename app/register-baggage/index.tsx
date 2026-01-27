@@ -2,6 +2,7 @@ import { baseUrl } from '@/api/config';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { styles } from '@/styles/registerLuggageList';
+import { getLuggageStatusColor, getLuggageStatusLabel, getStatusIcon, isCheckedInStatus } from '@/utils/luggage-utils';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,7 +11,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getLuggageStatusColor, getLuggageStatusLabel, getStatusIcon, isCheckedInStatus } from '@/utils/luggage-utils';
 
 /** Enum pour les types de bagages */
 export enum LuggageType {
