@@ -576,7 +576,3 @@ AllOn Mobile Pro est une application mobile professionnelle construite avec Reac
 Le système est conçu pour être maintenable, avec une séparation claire des responsabilités, une gestion d'état efficace, et une communication robuste avec le backend.
 
 ---
-
-**Document généré le** : 27 janvier 2026  
-**Version du document** : 1.0  
-**Auteur** : Analyse automatique du projet

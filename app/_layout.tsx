@@ -30,12 +30,14 @@ function AppContent() {
                 <Stack.Screen name="login/index" options={{ headerShown: false }} />
                 <Stack.Screen name="login/forgot-password" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-qr/index" options={{ headerShown: false }} />
+                <Stack.Screen name="scan-bagage/index" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-result/index" options={{ headerShown: false }} />
                 <Stack.Screen name="register-baggage/index" options={{ headerShown: false }} />
                 <Stack.Screen name="register-baggage/add" options={{ headerShown: false }} />
                 <Stack.Screen name="register-baggage/details" options={{ headerShown: false }} />
                 <Stack.Screen name="departure-details/index" options={{ headerShown: false }} />
                 <Stack.Screen name="track-route/index" options={{ headerShown: false }} />
+                <Stack.Screen name="track-route-mapbox/index" options={{ headerShown: false }} />
                 <Stack.Screen name="profile/index" options={{ headerShown: false }} />
                 <Stack.Screen name="bookings/index" options={{ headerShown: false }} />
                 <Stack.Screen name="booking-details/index" options={{ headerShown: false }} />

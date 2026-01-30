@@ -63,6 +63,12 @@
                 }
             ],
             [
+                "@rnmapbox/maps",
+                {
+                    "RNMBX_MAPBOX_TOKEN": "sk.eyJ1IjoiZGV0dHktcm9tYXJpYyIsImEiOiJjbWwwczl5aXUwMDVnM3JxeW1vMjVmNmJnIn0.xFOZodZOoxrkwpw-vzjBFA"
+                }
+            ],
+            [
                 "expo-maps",
                 {
                     "requestLocationPermission": true,
@@ -73,6 +79,9 @@
         "experiments": {
             "typedRoutes": true,
             "reactCompiler": true
+        },
+        "extra": {
+            "RNMBX_MAPBOX_TOKEN": "sk.eyJ1IjoiZGV0dHktcm9tYXJpYyIsImEiOiJjbWwwczl5aXUwMDVnM3JxeW1vMjVmNmJnIn0.xFOZodZOoxrkwpw-vzjBFA"
         }
     }
 }

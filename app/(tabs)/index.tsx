@@ -8,7 +8,7 @@ import { useDimensions } from '@/hooks/use-dimensions';
 import { styles } from '@/styles/homeScreen';
 import { formatDateForApi, getDateRange } from '@/utils/date';
 import { departureEventEmitter } from '@/utils/departure-events';
-import { extractCityFromStation, extractStationCode, transformApiDepartureToDeparture, type ApiDeparture } from '@/utils/departure-utils';
+import { transformApiDepartureToDeparture, type ApiDeparture } from '@/utils/departure-utils';
 import { logError } from '@/utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -590,6 +590,7 @@ export default function HomeScreen() {
                 updateCellsBatchingPeriod={50}
                 initialNumToRender={10}
                 windowSize={10}
+                style={{ flex: 1, paddingBottom: 100 }}
                 contentContainerStyle={
                     (loading || refreshing) && departures.length === 0
                         ? styles.contentContainerLoading

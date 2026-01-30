@@ -128,8 +128,9 @@ export default function DepartureDetailsScreen() {
             }
 
             // Redirige vers l'écran de suivi de trajet
+            // Route track-route-mapbox : pathname forcé car typed routes peut ne pas l’inclure encore
             router.push({
-                pathname: '/track-route',
+                pathname: '/track-route-mapbox' as '/track-route',
                 params: {
                     departure: JSON.stringify(departure),
                 },

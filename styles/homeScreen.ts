@@ -19,7 +19,7 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 12,
         paddingVertical: 8,
-        borderRadius: 8,
+        borderRadius: 16,
         alignSelf: 'flex-start',
     },
     filterButtonText: {

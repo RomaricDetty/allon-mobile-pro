@@ -2,7 +2,9 @@ import { Departure } from '@/components/departure-card';
 import { ThemedText } from '@/components/themed-text';
 import { styles } from '@/styles/departureDetails';
 import { getStatusColor, getStatusLabel } from '@/utils/departure-utils';
-import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 
 interface DepartureDetailsSectionProps {
@@ -34,6 +36,19 @@ export const DepartureDetailsSection: React.FC<DepartureDetailsSectionProps> = (
     isDark,
     onShowListReservations,
 }) => {
+
+    const [userRole, setUserRole] = useState<string | undefined>(undefined);
+
+    useEffect(() => {
+        const loadRole = async () => {
+            const role = await AsyncStorage.getItem('user_role');
+            setUserRole(role?.toUpperCase());
+        };
+        loadRole();
+    }, []);
+
+    const showBaggageButton = userRole?.toUpperCase() === 'PORTER';
+
     return (
         <View style={[styles.bottomSection, { borderTopColor: separatorColor }]}>
             {/* Date */}
@@ -108,7 +123,7 @@ export const DepartureDetailsSection: React.FC<DepartureDetailsSectionProps> = (
                 </>
             )}
 
-            {/* Informations supplémentaires */}
+            {/* Sièges */}
             {departure.seatsBooked !== undefined && (
                 <>
                     <View style={[styles.separator, { backgroundColor: separatorColor }]} />
@@ -119,6 +134,38 @@ export const DepartureDetailsSection: React.FC<DepartureDetailsSectionProps> = (
                         <ThemedText style={[styles.detailValue, { color: primaryTextColor }]}>
                             {departure.seatsBooked}
                         </ThemedText>
+                    </View>
+                </>
+            )}
+
+            <View style={[styles.separator, { backgroundColor: separatorColor }]} />
+
+            {/* Scanner un QR code de bagage */}
+            {showBaggageButton && (
+                <>
+                    <View style={styles.detailRow}>
+                        <ThemedText style={[styles.detailLabel, { color: labelTextColor }]}>
+                            Scanner un QR code de bagage
+                        </ThemedText>
+                        <Pressable
+                            style={{
+                                backgroundColor: departure.seatsBooked === 0 ? (isDark ? '#3A3A3C' : '#CCCCCC') : buttonBackgroundColor,
+                                paddingHorizontal: 10,
+                                paddingVertical: 5,
+                                borderRadius: 15,
+                                opacity: departure.seatsBooked === 0 ? 0.5 : 1
+                            }}
+                            onPress={() => router.push({
+                                pathname: '/scan-bagage',
+                                params: {
+                                    departure: JSON.stringify(departure),
+                                },
+                            })}
+                        >
+                            <ThemedText style={[styles.detailValue, { color: "#FFFFFF", fontSize: 13 }]}>
+                                Scanner QR
+                            </ThemedText>
+                        </Pressable>
                     </View>
                 </>
             )}
@@ -166,7 +213,7 @@ export const DepartureDetailsSection: React.FC<DepartureDetailsSectionProps> = (
                             backgroundColor: departure.seatsBooked === 0 ? (isDark ? '#3A3A3C' : '#CCCCCC') : buttonBackgroundColor,
                             paddingHorizontal: 10,
                             paddingVertical: 5,
-                            borderRadius: 10,
+                            borderRadius: 15,
                             opacity: departure.seatsBooked === 0 ? 0.5 : 1
                         }}
                         onPress={() => onShowListReservations(departure)}
@@ -177,6 +224,7 @@ export const DepartureDetailsSection: React.FC<DepartureDetailsSectionProps> = (
                     </Pressable>
                 </View>
             </>
+
         </View>
     );
 };

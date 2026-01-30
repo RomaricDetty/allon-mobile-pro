@@ -271,7 +271,7 @@ export const DepartureCard = React.memo(function DepartureCard({ departure, onTi
 
                 {/* Section inférieure : Date, Durée et Prix */}
                 <View style={[styles.bottomSection, { borderTopColor: borderColor, gap: 10 }]}>
-                    <View style={[{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }]}>
+                    <View style={[{ flexDirection: 'column', alignItems: 'flex-start', gap: 6, flexWrap: 'wrap', flexShrink: 1 }]}>
                         <View style={styles.infoItem}>
                             <MaterialIcons name="calendar-month" size={16} color={iconColor} />
                             <ThemedText style={[styles.infoText, { color: primaryTextColor }]}>
@@ -285,7 +285,7 @@ export const DepartureCard = React.memo(function DepartureCard({ departure, onTi
                             </ThemedText>
                         </View>
                     </View>
-                    <ThemedText style={[styles.price, { color: getStatusColor(departure.status, isDark), textAlign: 'right' }]}>
+                    <ThemedText style={[styles.price, { color: getStatusColor(departure.status, isDark), textAlign: 'right', flexWrap: 'wrap', flexShrink: 1 }]}>
                         {getStatusLabel(departure.status)}
                     </ThemedText>
                 </View>
@@ -296,11 +296,10 @@ export const DepartureCard = React.memo(function DepartureCard({ departure, onTi
 
 const styles = StyleSheet.create({
     card: {
-        borderRadius: 20,
+        borderRadius: 30,
         marginBottom: 16,
         padding: 18,
-        borderWidth: 1,
-        // borderColor: '#E5E5E5',
+        borderWidth: 1
     },
     // Section supérieure
     topSection: {

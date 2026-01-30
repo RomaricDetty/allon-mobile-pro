@@ -67,6 +67,8 @@ const ScanQRScreen = () => {
     const soundRef = useRef<Audio.Sound | null>(null);
     const scanAnimation = useRef(new Animated.Value(0)).current;
     const measureAttempts = useRef(0);
+    /** Verrou synchrone pour empêcher tout second scan avant le re-render */
+    const scanLockRef = useRef(false);
 
     console.log('params dans le scan-qr: ', JSON.stringify(params));
 
@@ -385,14 +387,28 @@ const ScanQRScreen = () => {
                 Alert.alert(
                     'Erreur',
                     response?.data?.message || response?.data?.error || 'Une erreur est survenue lors du traitement du scan. Veuillez réessayer.',
-                    [{ text: 'OK' }]
+                    [{ text: 'OK' }],
+                    { cancelable: true }
                 );
                 return;
             }
         } catch (error: any) {
-            console.error('[PROCESS] Erreur traitement scan:', error.message || error);
+            const statusCode = error.response?.status;
+            console.error('[PROCESS] Erreur traitement scan:', statusCode, error.response?.data?.message || error.message);
 
-            // Retry automatique pour les erreurs réseau
+            // 403 : pas le droit de scanner ce QR code (pas de retry)
+            if (statusCode === 403) {
+                await triggerHapticFeedback('error');
+                Alert.alert(
+                    'Accès refusé',
+                    'Vous n\'avez pas le droit de scanner ce QR code.',
+                    [{ text: 'OK', onPress: resetScan }],
+                    { cancelable: true }
+                );
+                return;
+            }
+
+            // Retry automatique pour les erreurs réseau uniquement
             if (retryCount < MAX_RETRIES &&
                 (error.message?.includes('Network') || error.message?.includes('timeout'))) {
                 console.log('[PROCESS] Nouvelle tentative...', { attempt: retryCount + 1 });
@@ -408,7 +424,8 @@ const ScanQRScreen = () => {
                 retryCount >= MAX_RETRIES
                     ? 'Impossible de traiter le scan après plusieurs tentatives. Vérifiez votre connexion.'
                     : 'Une erreur est survenue lors du traitement du scan.',
-                [{ text: 'OK', onPress: resetScan }]
+                [{ text: 'OK', onPress: resetScan }],
+                { cancelable: true }
             );
         } finally {
             setLoadingScanProcess(false);
@@ -419,11 +436,16 @@ const ScanQRScreen = () => {
      * Gère la détection du QR code
      */
     const handleBarCodeScanned = async ({ type, data, bounds, cornerPoints }) => {
+        // Verrou synchrone en premier : bloque tout second scan avant le re-render
+        if (scanLockRef.current) {
+            console.log('[SCAN] Verrou actif - ignoré');
+            return;
+        }
+
         console.log('\n[SCAN] === NOUVEAU SCAN DÉTECTÉ ===');
         console.log('[SCAN] Type:', type);
         console.log('[SCAN] Data:', data.substring(0, 50));
 
-        // Guards - dans l'ordre de priorité
         if (scanned || !isScanningEnabled) {
             console.log('[SCAN] Scan désactivé - ignoré');
             return;
@@ -440,7 +462,6 @@ const ScanQRScreen = () => {
             return;
         }
 
-        // Vérification zone AVANT toute autre action
         if (!isQRCodeInScanArea(bounds, cornerPoints)) {
             console.log('[SCAN] QR hors zone - ignoré\n');
             setDetectedQRs(prev => [...prev.slice(-4), {
@@ -451,10 +472,12 @@ const ScanQRScreen = () => {
             return;
         }
 
-        // Désactivation immédiate pour éviter les scans multiples
+        // Verrou immédiat + arrêt du scanner + loader (synchrone, avant tout setState)
+        scanLockRef.current = true;
         console.log('[SCAN] QR valide - traitement...\n');
         setIsScanningEnabled(false);
         setScanned(true);
+        setLoadingScanProcess(true);
         setHasScannedOnce(true);
         lastScanTime.current = now;
         lastScannedData.current = data;
@@ -471,7 +494,9 @@ const ScanQRScreen = () => {
 
         if (!validationData) {
             console.log('[SCAN] QR code invalide ou erreur API');
+            setLoadingScanProcess(false);
             setScanned(false);
+            scanLockRef.current = false;
             await triggerHapticFeedback('error');
 
             Alert.alert(
@@ -480,6 +505,7 @@ const ScanQRScreen = () => {
                 [{
                     text: 'Réessayer',
                     onPress: () => {
+                        scanLockRef.current = false;
                         setIsScanningEnabled(true);
                         lastScannedData.current = null;
                     }
@@ -495,8 +521,7 @@ const ScanQRScreen = () => {
             timestamp: now
         }]);
 
-        // Traitement final
-        setLoadingScanProcess(true);
+        // Traitement final (loader déjà affiché)
         await processScan(validationData);
     };
 
@@ -511,8 +536,10 @@ const ScanQRScreen = () => {
     /**
      * Réinitialise l'état du scan
      */
+    /** Réinitialise l'état du scan et déverrouille pour permettre un nouveau scan */
     const resetScan = () => {
         console.log('[SCAN] Réinitialisation du scan');
+        scanLockRef.current = false;
         setScanned(false);
         setIsScanningEnabled(true);
         lastScanTime.current = 0;
@@ -622,18 +649,18 @@ const ScanQRScreen = () => {
                                     <View style={[styles.gridLineHorizontal, { top: '66.66%' }]} />
                                 </View>
                             )}
-
-                            {/* Indicateur de chargement */}
-                            {loadingScanProcess && (
-                                <View style={styles.loadingScanProcess}>
-                                    <ActivityIndicator size={50} color="#FFF" />
-                                    <Text style={styles.loadingText}>Traitement...</Text>
-                                </View>
-                            )}
                         </View>
 
                         <View style={styles.overlaySide} />
                     </View>
+
+                    {/* Indicateur de chargement pleine page */}
+                    {loadingScanProcess && (
+                        <View style={styles.loadingScanProcess} pointerEvents="box-only">
+                            <ActivityIndicator size="large" color="#FFF" />
+                            <Text style={styles.loadingText}>Traitement en cours...</Text>
+                        </View>
+                    )}
 
                     {/* Zone inférieure */}
                     <View style={styles.overlayBottom}>
@@ -838,13 +865,11 @@ const styles = StyleSheet.create({
         color: '#FFF',
     },
     loadingScanProcess: {
-        position: 'absolute',
-        width: '100%',
-        height: '100%',
+        ...StyleSheet.absoluteFillObject,
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 1000,
-        backgroundColor: 'rgba(0,0,0,0.85)',
+        backgroundColor: 'rgba(0,0,0,0.9)',
     },
     loadingText: {
         fontSize: 16,

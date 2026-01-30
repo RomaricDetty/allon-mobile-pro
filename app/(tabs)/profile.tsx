@@ -6,7 +6,7 @@ import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -159,7 +159,7 @@ export default function ProfileScreen() {
                 contentContainerStyle={[
                     styles.scrollContent,
                     {
-                        paddingBottom: 70,
+                        paddingBottom: Platform.OS === 'ios' ? 100 : 120,
                     }
                 ]}
                 showsVerticalScrollIndicator={false}
