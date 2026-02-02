@@ -35,6 +35,21 @@ export interface Departure {
     seatsAvailable?: number;
     seatsBooked?: number;
     status?: string;
+    trip?: {
+        coordinates?: {
+            latitude?: number;
+            longitude?: number;
+        };
+        /** Coordonnées des stations (API trip) pour tracer l'itinéraire */
+        stationFrom?: {
+            name?: string;
+            coordinate?: { latitude?: number; longitude?: number };
+        };
+        stationTo?: {
+            name?: string;
+            coordinate?: { latitude?: number; longitude?: number };
+        };
+    };
 }
 
 /**

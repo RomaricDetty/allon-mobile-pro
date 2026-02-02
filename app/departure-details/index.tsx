@@ -24,6 +24,7 @@ export default function DepartureDetailsScreen() {
     const initialDeparture = useMemo<Departure | null>(() => {
         try {
             if (params.departure) {
+                console.log('params.departure ===> ', params.departure);
                 return JSON.parse(params.departure) as Departure;
             }
         } catch (error) {

@@ -109,13 +109,46 @@ export const getStatusColor = (status?: string, isDark: boolean = false): string
 };
 
 /**
+ * Coordonnées géographiques (API trip)
+ */
+export interface TripCoordinate {
+    latitude: number;
+    longitude: number;
+}
+
+/**
+ * Station d'un trajet (API trip)
+ */
+export interface TripStation {
+    id: string;
+    name: string;
+    address?: string;
+    city?: string;
+    coordinate?: TripCoordinate;
+}
+
+/**
+ * Données d'un trajet (trip) renvoyées par l'API
+ */
+export interface Trip {
+    id: string;
+    label: string;
+    basePrice?: string;
+    calculatedPrice?: string;
+    distanceKm?: string;
+    durationMinutes?: number;
+    stationFrom: TripStation;
+    stationTo: TripStation;
+}
+
+/**
  * Interface pour les données de départ de l'API
  */
 export interface ApiDeparture {
     id: string;
     departureDateTime: string;
     arrivalEta: string;
-    trip: {
+    trip: Trip | {
         label: string;
         stationFrom: { name: string };
         stationTo: { name: string };
@@ -264,6 +297,18 @@ export const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): an
         statusText = `Retard: ${apiDeparture.delayMinutes}min`;
     }
 
+    const t = apiDeparture.trip;
+    const tripForDeparture = {
+        label: t.label,
+        stationFrom: t.stationFrom,
+        stationTo: t.stationTo,
+        ...('distanceKm' in t && { distance: (t as Trip).distanceKm }),
+        ...('durationMinutes' in t && { estimatedDuration: (t as Trip).durationMinutes }),
+        ...('id' in t && { id: (t as Trip).id }),
+        ...('basePrice' in t && { basePrice: (t as Trip).basePrice }),
+        ...('calculatedPrice' in t && { calculatedPrice: (t as Trip).calculatedPrice }),
+    };
+
     return {
         id: apiDeparture.id,
         company: apiDeparture.company.name,
@@ -281,7 +326,6 @@ export const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): an
         date: formattedDate,
         duration: durationText,
         price: formattedPrice,
-        // Propriétés de compatibilité
         line: `${apiDeparture.bus.busType} - ${apiDeparture.bus.mark}`,
         destination: apiDeparture.trip.label,
         departureDate: formattedDate,
@@ -289,5 +333,6 @@ export const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): an
         seatsBooked: apiDeparture.seatsBooked,
         status: statusText,
         busLicensePlate: apiDeparture.bus.licencePlate,
+        trip: tripForDeparture,
     };
 };

@@ -96,6 +96,10 @@ export default function HomeScreen() {
                 AsyncStorage.getItem('user_role'),
             ]);
 
+            console.log('token ===> ', token);
+            console.log('refreshToken ===> ', refreshToken);
+            console.log('user_role ===> ', user_role);
+
             // Si aucun token n'existe, rediriger vers l'écran de connexion
             if (!token || !refreshToken || !user_role) {
                 await clearAuthData();
@@ -109,10 +113,12 @@ export default function HomeScreen() {
             // Vérifier si le token est expiré ou sur le point d'expirer (marge de 5 minutes)
             const isTokenExpired = !expiresAtDate || expiresAtDate < new Date(currentDate.getTime() + 5 * 60 * 1000);
 
+            console.log('isTokenExpired ===> ', isTokenExpired);
             // Rafraîchir le token uniquement si nécessaire
             if (isTokenExpired) {
                 try {
                     const response = await refreshTokenApi(refreshToken);
+                    console.log('response refresh token ===> ', response);
 
                     if (response.status === 200 && response.data?.access_token) {
                         // Calculer le timestamp d'expiration en ajoutant expires_in (en secondes) à la date actuelle
@@ -139,6 +145,8 @@ export default function HomeScreen() {
 
             // Si le token est encore valide
             if (token) {
+                console.log('token is valid ===> ');
+                console.log('user_role ===> ', user_role);
                 return true;
             }
 
@@ -163,6 +171,9 @@ export default function HomeScreen() {
      */
     const loadDepartures = useCallback(async (page: number = 1, isRefresh: boolean = false) => {
         try {
+            console.log('loadDepartures ===> ');
+            console.log('page ===> ', page);
+            console.log('isRefresh ===> ', isRefresh);
             // Afficher le loader approprié
             if (isRefresh) {
                 setRefreshing(true);
@@ -176,6 +187,10 @@ export default function HomeScreen() {
             const token = await AsyncStorage.getItem('token');
             const userId = await AsyncStorage.getItem('user_id');
             const userRole = await AsyncStorage.getItem('user_role');
+
+            console.log('token ===> ', token);
+            console.log('userId ===> ', userId);
+            console.log('userRole ===> ', userRole);
 
             if (!token || !userId || !userRole) {
                 setError('Vous devez être connecté pour voir vos trajets');
@@ -211,9 +226,11 @@ export default function HomeScreen() {
             console.log('queryParams ===> ', queryParams);
 
             const response = await getUserDeparturesApi(queryParams, token);
+            console.log('response loading departures ===> ', response);
             const data: PaginatedResponse = response.data;
 
             console.log('data received ==>', data);
+            console.log('data.items ===> ', data.items[0]?.trip);
 
             if (data?.items && Array.isArray(data.items)) {
                 const transformedDepartures = data.items.map(transformApiDepartureToDeparture) as Departure[];
@@ -285,37 +302,35 @@ export default function HomeScreen() {
     }, [currentPage, hasMore, loadingMore, loading, refreshing, loadDepartures, totalPages]);
 
     /**
-     * Vérifie la session au chargement du composant
+     * Vérifie la session au chargement, puis charge les départs uniquement si la session est valide.
+     * Garantit l'ordre : checkUserSession terminé → ensuite loadDepartures.
      */
     useEffect(() => {
         const verifySession = async () => {
             const isValid = await checkUserSession();
+            console.log('isValid ===> ', isValid);
             setIsSessionValid(isValid);
+            if (isValid) {
+                setCurrentPage(1);
+                setHasMore(true);
+                loadDepartures(1, false);
+            }
         };
         verifySession();
     }, [checkUserSession]);
 
     /**
-     * Charge les départs au montage du composant et quand le filtre change
-     * Ne charge pas automatiquement pour le filtre 'custom'
-     * Ne charge que si la session est valide
+     * Recharge les départs quand le filtre de date ou les dates custom changent (session déjà valide).
+     * isSessionValid / isCheckingSession volontairement exclus des deps pour éviter un double chargement au montage.
      */
     useEffect(() => {
-        // Ne pas charger si la session n'est pas valide ou si on est en train de vérifier
-        if (isCheckingSession || !isSessionValid) {
-            return;
-        }
-
-        // Ne pas charger automatiquement pour le filtre custom
-        // Le chargement sera déclenché manuellement après la sélection des deux dates
-        if (dateFilter === 'custom' && !customDatesReady) {
-            return;
-        }
+        if (isCheckingSession || !isSessionValid) return;
+        if (dateFilter === 'custom' && !customDatesReady) return;
 
         setCurrentPage(1);
         setHasMore(true);
         loadDepartures(1, false);
-    }, [loadDepartures, dateFilter, customDatesReady, isSessionValid, isCheckingSession]);
+    }, [dateFilter, customDatesReady, loadDepartures]);
 
     /**
      * Écoute les événements de mise à jour de statut des départs

@@ -23,11 +23,12 @@ export const getUserDepartures = async (userId: string, token: string): Promise<
  * @returns AxiosResponse<any>
  */
 export const getUserDeparturesApi = async (queryParams: string, token: string): Promise<AxiosResponse<any>> => {
-    return await axios.get(`${baseUrl}/departures?${queryParams}`, {
-        headers: {
-            Authorization: `Bearer ${token}`,
-        },
-    });
+    const url = `${baseUrl}/departures?${queryParams}`;
+    const headers = { Authorization: `Bearer ${token}` };
+    // Log requête complète pour copier-coller dans Postman
+    console.log('[POSTMAN] GET', url);
+    console.log('[POSTMAN] Header: Authorization = Bearer ' + token);
+    return await axios.get(url, { headers });
 }
 
 /**

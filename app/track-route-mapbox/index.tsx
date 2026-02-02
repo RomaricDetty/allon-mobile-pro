@@ -9,9 +9,9 @@ import { styles } from "@/styles/track-route";
 import { DEFAULT_LATITUDE_DELTA } from "@/app/track-route/constants";
 import { getMapboxAccessToken } from "./constants";
 import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { ActivityIndicator, Animated, View } from "react-native";
-import { MapView, Camera, setAccessToken } from "@rnmapbox/maps";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Image, StyleSheet, View } from "react-native";
+import { MapView, Camera, setAccessToken, ShapeSource, LineLayer, MarkerView } from "@rnmapbox/maps";
 import { ThemedText } from "@/components/themed-text";
 
 /** Écran de suivi de trajet avec Mapbox – position du conducteur en temps réel */
@@ -34,6 +34,8 @@ export default function TrackRouteMapboxScreen() {
 
     const slideAnim = useRef(new Animated.Value(0)).current;
     const actionSlideAnim = useRef(new Animated.Value(0)).current;
+    const [routeCoordinates, setRouteCoordinates] = useState<[number, number][] | null>(null);
+    const [routeLoading, setRouteLoading] = useState(false);
 
     useEffect(() => {
         try {
@@ -79,11 +81,79 @@ export default function TrackRouteMapboxScreen() {
         if (!departure.departure) router.back();
     }, [departure.departure]);
 
+    /** Récupère l'itinéraire routier (routes praticables) via l'API Mapbox Directions */
+    const trip = departure.departure?.trip;
+    const fromCoord = useMemo((): [number, number] | null => {
+        const from = (trip?.stationFrom as { coordinate?: { latitude?: number; longitude?: number } } | undefined)?.coordinate;
+        if (!from) return null;
+        const lat = typeof from.latitude === "number" ? from.latitude : Number(from.latitude);
+        const lng = typeof from.longitude === "number" ? from.longitude : Number(from.longitude);
+        if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+        return [lng, lat];
+    }, [trip?.stationFrom?.coordinate]);
+    const toCoord = useMemo((): [number, number] | null => {
+        const to = (trip?.stationTo as { coordinate?: { latitude?: number; longitude?: number } } | undefined)?.coordinate;
+        if (!to) return null;
+        const lat = typeof to.latitude === "number" ? to.latitude : Number(to.latitude);
+        const lng = typeof to.longitude === "number" ? to.longitude : Number(to.longitude);
+        if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+        return [lng, lat];
+    }, [trip?.stationTo?.coordinate]);
+
+    useEffect(() => {
+        if (!fromCoord || !toCoord) {
+            setRouteCoordinates(null);
+            return;
+        }
+        let cancelled = false;
+        setRouteLoading(true);
+        setRouteCoordinates(null);
+        const token = getMapboxAccessToken();
+        const coords = `${fromCoord[0]},${fromCoord[1]};${toCoord[0]},${toCoord[1]}`;
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${token}`;
+        fetch(url)
+            .then((res) => res.json())
+            .then((data: { routes?: { geometry?: { coordinates?: [number, number][] } }[] }) => {
+                if (cancelled) return;
+                const coordsRoute = data.routes?.[0]?.geometry?.coordinates;
+                if (Array.isArray(coordsRoute) && coordsRoute.length >= 2) {
+                    setRouteCoordinates(coordsRoute);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setRouteCoordinates(null);
+            })
+            .finally(() => {
+                if (!cancelled) setRouteLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1]]);
+
     if (!departure.departure) return null;
 
     const centerCoord = map.toMapboxPosition(location.latitude, location.longitude);
 
     /** Ne contrôle la caméra par props qu’en mode suivi pour permettre le pan sinon */
+    const routeShape = useMemo(() => {
+        const coords = routeCoordinates && routeCoordinates.length >= 2
+            ? routeCoordinates
+            : fromCoord && toCoord
+                ? [fromCoord, toCoord]
+                : null;
+        if (!coords) return null;
+        return {
+            type: "FeatureCollection" as const,
+            features: [{
+                type: "Feature" as const,
+                properties: {},
+                geometry: {
+                    type: "LineString" as const,
+                    coordinates: coords,
+                },
+            }],
+        };
+    }, [routeCoordinates, fromCoord, toCoord]);
+
     const cameraCenter = departure.isRouteStarted ? centerCoord : undefined;
 
     return (
@@ -136,6 +206,29 @@ export default function TrackRouteMapboxScreen() {
                             heading: location.heading ?? 0,
                         }}
                     />
+                    {routeShape && (
+                        <ShapeSource id="route-source" shape={routeShape}>
+                            <LineLayer
+                                id="route-line"
+                                style={{
+                                    lineColor: "#1776BA",
+                                    lineWidth: 4,
+                                    lineCap: "round",
+                                    lineJoin: "round",
+                                }}
+                            />
+                        </ShapeSource>
+                    )}
+                    {fromCoord && (
+                        <MarkerView coordinate={fromCoord} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+                            <Image source={require("@/assets/images/flag-start.png")} style={routeMarkerStyles.flag} resizeMode="contain" />
+                        </MarkerView>
+                    )}
+                    {toCoord && (
+                        <MarkerView coordinate={toCoord} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+                            <Image source={require("@/assets/images/flag-end.png")} style={routeMarkerStyles.flag} resizeMode="contain" />
+                        </MarkerView>
+                    )}
                     <UserMarkerMapbox coordinate={centerCoord} heading={location.heading} />
                 </MapView>
                 <ActionModal
@@ -163,3 +256,7 @@ export default function TrackRouteMapboxScreen() {
         </View>
     );
 }
+
+const routeMarkerStyles = StyleSheet.create({
+    flag: { width: 36, height: 36 },
+});
