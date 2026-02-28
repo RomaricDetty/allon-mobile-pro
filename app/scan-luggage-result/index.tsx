@@ -4,7 +4,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { styles } from '@/styles/scan-luggage-result';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -98,6 +98,7 @@ export default function ScanLuggageResultScreen() {
     const params = useLocalSearchParams<{ luggageData: string }>();
     const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
     const [stationId, setStationId] = useState<string | null>(null);
+    const navigation = useNavigation<any>();
 
     const luggage = useMemo((): BaggageFromQR | null => {
         try {
@@ -145,14 +146,16 @@ export default function ScanLuggageResultScreen() {
             if (loadingAction) return;
             Alert.alert(title, message, [
                 { text: 'Annuler', style: 'cancel' },
-                { text: 'Confirmer', onPress: async () => {
-                    setLoadingAction(action);
-                    try {
-                        await run();
-                    } finally {
-                        setLoadingAction(null);
+                {
+                    text: 'Confirmer', onPress: async () => {
+                        setLoadingAction(action);
+                        try {
+                            await run();
+                        } finally {
+                            setLoadingAction(null);
+                        }
                     }
-                } },
+                },
             ]);
         },
         [loadingAction]
@@ -257,6 +260,25 @@ export default function ScanLuggageResultScreen() {
         { label: 'Frais fragilité', value: `${luggage.fragileFee ?? 0} ${currency}` },
     ];
 
+    /**
+     * Retour à l'écran d'accueil.
+     */
+    const goToHome = useCallback(() => {
+        // console.log('goToHome ===>, ', JSON.stringify(navigation, null, 2));
+        // const stackNav = navigation.getParent();
+        // if (stackNav) {
+        //     stackNav.dispatch(
+        //         CommonActions.reset({
+        //             index: 0,
+        //             routes: [{ name: '' }],
+        //         })
+        //     );
+        // } else {
+            router.dismissAll();
+            router.replace('/(tabs)');
+        // }
+    }, []);
+
     const isLoadLoading = loadingAction === 'load';
     const isUnloadLoading = loadingAction === 'unload';
     const isDeliverLoading = loadingAction === 'deliver';
@@ -264,7 +286,7 @@ export default function ScanLuggageResultScreen() {
     return (
         <View style={[styles.container, { backgroundColor: colors.bg }]}>
             <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: insets.top + 8 }]}>
-                <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
+                <TouchableOpacity style={styles.headerButton} onPress={() => goToHome()}>
                     <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
                 <ThemedText style={[styles.headerTitle, { color: '#FFFFFF' }]}>Résultat scan bagage</ThemedText>
