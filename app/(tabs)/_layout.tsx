@@ -12,14 +12,10 @@ const TAB_SELECTED_CONTENT = '#FFFFFF';
 const TAB_BAR_SHADOW_COLOR = 'rgba(0, 0, 0, 0.5)';
 const TAB_BAR_ELEVATION = 8;
 
-/** Icônes des onglets : images (require) sur Android, SF Symbols sur iOS */
+/** Icônes des onglets : SF Symbols sur iOS, images du bundle sur Android (drawables natifs absents) */
 const tabIcons = {
-    bus: Platform.OS === 'android'
-        ? { src: require('@/assets/images/bus-tabs.png') }
-        : { sf: 'bus.fill' as const },
-    person: Platform.OS === 'android'
-        ? { src: require('@/assets/images/user.png') }
-        : { sf: 'person.fill' as const },
+    bus: { sf: 'bus.fill' as const, androidSrc: require('@/assets/images/bus-tabs.png') },
+    person: { sf: 'person.fill' as const, androidSrc: require('@/assets/images/user.png') },
 };
 
 /** Retourne les props de style de la barre d’onglets pour Android (couleurs thème) */

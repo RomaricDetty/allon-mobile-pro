@@ -48,6 +48,71 @@ export const verifyQRCode = async (qrCode: string, token: string): Promise<Axios
 }
 
 /**
+ * Vérifie si le QR code est valide
+ * @param qrCode - Le QR code à vérifier
+ * @param token - Le token d'authentification
+ * @returns AxiosResponse<any>
+ */
+export const verifyLuggageQRCode = async (qrCode: string, token: string): Promise<AxiosResponse<any>> => {
+    console.log("[SCAN] Vérification du QR code:", qrCode);
+    console.log("[SCAN] URL:", `${baseUrl}/luggage/tag/${qrCode}`);
+    console.log("[SCAN] Token:", token);
+    console.log("[SCAN] Headers:", {
+        Authorization: `Bearer ${token}`
+    });
+    return await axios.get(`${baseUrl}/luggage/tag/${qrCode}`, {
+        headers: {
+            Authorization: `Bearer ${token}`
+        },
+    });
+}
+
+/**
+ * Marque un bagage comme chargé
+ * @param payload - Les données du bagage
+ * @param id - L'ID du bagage
+ * @param token - Le token d'authentification
+ * @returns AxiosResponse<any>
+ */
+export const loadLuggageApi = async (payload: any, id: string, token: string): Promise<AxiosResponse<any>> => {
+    return await axios.post(`${baseUrl}/luggage/${id}/load`, payload, {
+        headers: {
+            Authorization: `Bearer ${token}`
+        },
+    });
+}
+
+/**
+ * Marque un bagage comme déchargé
+ * @param payload - Les données du bagage
+ * @param id - L'ID du bagage
+ * @param token - Le token d'authentification
+ * @returns AxiosResponse<any>
+ */
+export const unLoadLuggageApi = async (payload: any, id: string, token: string): Promise<AxiosResponse<any>> => {
+    return await axios.post(`${baseUrl}/luggage/${id}/unload`, payload, {
+        headers: {
+            Authorization: `Bearer ${token}`
+        },
+    });
+}
+
+/**
+ * Marque un bagage comme livré
+ * @param payload - Les données du bagage
+ * @param id - L'ID du bagage
+ * @param token - Le token d'authentification
+ * @returns AxiosResponse<any>
+ */
+export const deliverLuggageApi = async (payload: any, id: string, token: string): Promise<AxiosResponse<any>> => {
+    return await axios.post(`${baseUrl}/luggage/${id}/deliver`, payload, {
+        headers: {
+            Authorization: `Bearer ${token}`
+        },
+    });
+}
+
+/**
  * Traite le scan du QR code
  * @param objetToValidate - L'objet à valider
  * @param token - Le token d'authentification
@@ -71,6 +136,12 @@ export const processScanApi = async (objetToValidate: Object, token: string): Pr
  * @returns AxiosResponse<any>
  */
 export const getBookingsByDepartureIdApi = async (queryParams: string, token: string): Promise<AxiosResponse<any>> => {
+    console.log("[BOOKINGS] Récupère la liste des réservations pour un départ spécifique:", {
+        queryParams,
+        token,
+    });
+
+    console.log("[BOOKINGS] URL:", `${baseUrl}/bookings?${queryParams}`);
     return await axios.get(`${baseUrl}/bookings?${queryParams}`, {
         headers: {
             Authorization: `Bearer ${token}`,

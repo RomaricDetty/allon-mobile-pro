@@ -476,7 +476,7 @@ export default function LuggageDetailsScreen() {
                             <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                             <View style={styles.section}>
                                 <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>
-                                    Informations de check-in
+                                    Informations d'enregistrement
                                 </ThemedText>
                                 {luggage.tagNumber && renderDetailRow('Numéro de tag', luggage.tagNumber)}
                                 {isCheckedIn && qrValue && (
@@ -512,20 +512,20 @@ export default function LuggageDetailsScreen() {
                                                     <MaterialIcons name="qr-code-2" size={20} color="#FFFFFF" />
                                                     <ThemedText style={styles.qrCodeButtonText} numberOfLines={1}>QR code</ThemedText>
                                                 </TouchableOpacity> */}
-                                                <TouchableOpacity
+                                                {/* <TouchableOpacity
                                                     style={[styles.printButton, { backgroundColor: '#1776BA', flex: 1 }]}
                                                     onPress={handlePrintReceipt}
                                                 >
                                                     <MaterialIcons name="print" size={20} color="#FFFFFF" />
                                                     <ThemedText style={styles.printButtonText} numberOfLines={1}>Imprimer</ThemedText>
-                                                </TouchableOpacity>
+                                                </TouchableOpacity> */}
                                             </View>
                                         </View>
                                     </>
                                 )}
                                 {luggage.checkedInAt &&
                                     renderDetailRow(
-                                        'Date de check-in',
+                                        'Date d\'enregistrement',
                                         new Date(luggage.checkedInAt).toLocaleString('fr-FR', {
                                             dateStyle: 'long',
                                             timeStyle: 'short',

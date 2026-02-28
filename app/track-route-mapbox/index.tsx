@@ -1,18 +1,18 @@
-import { useTrackRouteLocation } from "@/hooks/use-track-route-location";
-import { useTrackRouteMapMapbox } from "@/hooks/use-track-route-map-mapbox";
-import { useTrackRouteDeparture } from "@/hooks/use-track-route-departure";
+import { DEFAULT_LATITUDE_DELTA } from "@/app/track-route/constants";
+import UserMarkerMapbox from "@/components/map/user-marker-mapbox";
+import { ThemedText } from "@/components/themed-text";
+import { ActionModal, ConfirmModal, MapControls } from "@/components/track-route";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useDimensions } from "@/hooks/use-dimensions";
-import { ActionModal, ConfirmModal, MapControls } from "@/components/track-route";
-import UserMarkerMapbox from "@/components/map/user-marker-mapbox";
+import { useTrackRouteDeparture } from "@/hooks/use-track-route-departure";
+import { useTrackRouteLocation } from "@/hooks/use-track-route-location";
+import { useTrackRouteMapMapbox } from "@/hooks/use-track-route-map-mapbox";
 import { styles } from "@/styles/track-route";
-import { DEFAULT_LATITUDE_DELTA } from "@/app/track-route/constants";
-import { getMapboxAccessToken } from "./constants";
+import { Camera, LineLayer, MapView, MarkerView, setAccessToken, ShapeSource } from "@rnmapbox/maps";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, StyleSheet, View } from "react-native";
-import { MapView, Camera, setAccessToken, ShapeSource, LineLayer, MarkerView } from "@rnmapbox/maps";
-import { ThemedText } from "@/components/themed-text";
+import { getMapboxAccessToken } from "./constants";
 
 /** Écran de suivi de trajet avec Mapbox – position du conducteur en temps réel */
 export default function TrackRouteMapboxScreen() {
@@ -84,7 +84,7 @@ export default function TrackRouteMapboxScreen() {
     /** Récupère l'itinéraire routier (routes praticables) via l'API Mapbox Directions */
     const trip = departure.departure?.trip;
     const fromCoord = useMemo((): [number, number] | null => {
-        const from = (trip?.stationFrom as { coordinate?: { latitude?: number; longitude?: number } } | undefined)?.coordinate;
+        const from = trip?.coordinate;
         if (!from) return null;
         const lat = typeof from.latitude === "number" ? from.latitude : Number(from.latitude);
         const lng = typeof from.longitude === "number" ? from.longitude : Number(from.longitude);
@@ -92,7 +92,7 @@ export default function TrackRouteMapboxScreen() {
         return [lng, lat];
     }, [trip?.stationFrom?.coordinate]);
     const toCoord = useMemo((): [number, number] | null => {
-        const to = (trip?.stationTo as { coordinate?: { latitude?: number; longitude?: number } } | undefined)?.coordinate;
+        const to = trip?.stationTo?.coordinate;
         if (!to) return null;
         const lat = typeof to.latitude === "number" ? to.latitude : Number(to.latitude);
         const lng = typeof to.longitude === "number" ? to.longitude : Number(to.longitude);
@@ -129,8 +129,6 @@ export default function TrackRouteMapboxScreen() {
         return () => { cancelled = true; };
     }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1]]);
 
-    if (!departure.departure) return null;
-
     const centerCoord = map.toMapboxPosition(location.latitude, location.longitude);
 
     /** Ne contrôle la caméra par props qu’en mode suivi pour permettre le pan sinon */
@@ -153,8 +151,9 @@ export default function TrackRouteMapboxScreen() {
             }],
         };
     }, [routeCoordinates, fromCoord, toCoord]);
+    const cameraCenter = departure.departure && departure.isRouteStarted ? centerCoord : undefined;
 
-    const cameraCenter = departure.isRouteStarted ? centerCoord : undefined;
+    if (!departure.departure) return null;
 
     return (
         <View style={[styles.container, { backgroundColor: isDark ? "#000000" : "#F3F3F7" }]}>

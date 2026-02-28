@@ -1,5 +1,5 @@
 //@ts-nocheck
-import { processScanApi, verifyQRCode } from '@/api/departures';
+import { processScanApi, verifyLuggageQRCode } from '@/api/departures';
 import { styles } from '@/styles/scan-bagage';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,11 +26,82 @@ const SCAN_COOLDOWN = 2000;
 const API_TIMEOUT = 10000;
 const ALLOWED_ROLE = 'PORTER';
 
-interface QRValidationData {
-    c: string;
-    cid: string;
-    did: string;
-    t: string;
+/** Résumé réservation associée au bagage */
+interface BaggageBooking {
+    id: string;
+    code: string;
+    trip: string;
+    bookingDateTime: string;
+}
+
+/** Dimensions (total, width, height, length en cm) */
+interface BaggageDimensions {
+    total: number;
+    width: number;
+    height: number;
+    length: number;
+}
+
+/** Utilisateur (createdBy / updatedBy) */
+interface BaggageUser {
+    id: string;
+    firstName: string;
+    lastName: string;
+    username: string;
+    middleName: string | null;
+    dateOfBirth: string;
+    picture: string | null;
+    email: string;
+    civility: string;
+    address: string;
+    roleID: string;
+    roleCode: string;
+    phones?: Array<{ type: string; digits: string }>;
+    createdAt: string;
+    active: boolean;
+}
+
+/** Réponse API vérification QR code bagage (GET /luggage/tag/:tag) */
+interface BaggageFromQR {
+    id: string;
+    bookingItemId: string;
+    booking: BaggageBooking;
+    type: string;
+    status: string;
+    estimatedWeight: number;
+    actualWeight: number;
+    estimatedDimensions: BaggageDimensions;
+    actualDimensions: BaggageDimensions;
+    price: number;
+    basePrice: number;
+    excessWeightFee: number;
+    oversizedFee: number;
+    fragileFee: number;
+    currency: string;
+    tagNumber: string;
+    qrCode: string | null;
+    registeredAt: string;
+    checkedInAt: string | null;
+    loadedAt: string | null;
+    unloadedAt: string | null;
+    deliveredAt: string | null;
+    cancelledAt: string | null;
+    excessFeePaymentId: string | null;
+    excessFeePaidAt: string | null;
+    description: string;
+    isFragile: boolean;
+    vehicleCompartment: string | null;
+    position: string | null;
+    checkedInBy: string;
+    loadedBy: string | null;
+    unloadedBy: string | null;
+    deliveredBy: string | null;
+    stationId: string;
+    cancelReason: string | null;
+    createdBy: BaggageUser;
+    updatedBy: BaggageUser;
+    createdAt: string;
+    updatedAt: string;
 }
 
 interface DetectedQR {
@@ -199,23 +270,22 @@ const ScanBagageScreen = () => {
             new Promise<T>((_, rej) => setTimeout(() => rej(new Error('Request timeout')), ms)),
         ]);
 
-    const verifyQRCodeApi = async (data: string): Promise<QRValidationData | null> => {
+    const verifyQRCodeApi = async (data: string): Promise<BaggageFromQR | null> => {
         try {
             const token = await AsyncStorage.getItem('token');
             if (!token) {
                 Alert.alert('Erreur', 'Session expirée. Veuillez vous reconnecter.');
                 return null;
             }
-            const response = await withTimeout(verifyQRCode(data, token));
-            if (
-                response?.data &&
-                typeof response.data.c === 'string' &&
-                typeof response.data.cid === 'string' &&
-                typeof response.data.did === 'string' &&
-                typeof response.data.t === 'string'
-            ) {
-                return response.data as QRValidationData;
+            console.log("[SCAN] Vérification du QR code:", data);
+            const response = await withTimeout(verifyLuggageQRCode(data, token));
+            console.log("[SCAN] Réponse de la vérification du QR code:", response);
+            console.log("[SCAN] Réponse de la vérification du QR code:", response.data);
+            if (response?.data) {
+                console.log("SCAN OKAY !!!");
+                return response.data as BaggageFromQR;
             }
+            console.log("SCAN NOT OKAY !!!");
             return null;
         } catch (error: any) {
             if (error.message?.includes('timeout')) {
@@ -223,33 +293,34 @@ const ScanBagageScreen = () => {
             } else if (error.message?.includes('Network')) {
                 Alert.alert('Erreur réseau', 'Vérifiez votre connexion internet.');
             }
+            console.log("SCAN NOT OKAY 2 !!!");
             return null;
         }
     };
 
-    const processScan = async (validationData: QRValidationData, retryCount = 0) => {
+    const processScan = async (baggage: BaggageFromQR, retryCount = 0) => {
         const MAX_RETRIES = 2;
         try {
             const token = await AsyncStorage.getItem('token');
             if (!token) throw new Error('Token non disponible');
-            const response = await withTimeout(processScanApi(validationData, token));
+            const response = await withTimeout(processScanApi(baggage, token));
             if (response?.data) {
-                let departure: any = null;
-                try {
-                    if (params.departure) departure = JSON.parse(params.departure);
-                } catch (_) {}
-                const bookingDepartureId = response.data?.booking?.departure?.id;
-                const departureId = departure?.id;
-                if (departureId && bookingDepartureId && departureId !== bookingDepartureId) {
-                    await triggerHapticFeedback('error');
-                    setLoadingScanProcess(false);
-                    Alert.alert(
-                        'Ticket invalide',
-                        'Ce ticket ne correspond pas au départ sélectionné.',
-                        [{ text: 'OK', onPress: resetScan }]
-                    );
-                    return;
-                }
+                // let departure: any = null;
+                // try {
+                //     if (params.departure) departure = JSON.parse(params.departure);
+                // } catch (_) {}
+                // const bookingDepartureId = (response.data as any)?.booking?.departure?.id ?? (response.data as BaggageFromQR)?.booking?.id;
+                // const departureId = departure?.id;
+                // if (departureId && bookingDepartureId && departureId !== bookingDepartureId) {
+                //     await triggerHapticFeedback('error');
+                //     setLoadingScanProcess(false);
+                //     Alert.alert(
+                //         'Ticket invalide',
+                //         'Ce ticket ne correspond pas au départ sélectionné.',
+                //         [{ text: 'OK', onPress: resetScan }]
+                //     );
+                //     return;
+                // }
                 await triggerHapticFeedback('success');
                 router.push({
                     pathname: '/scan-result',
@@ -280,7 +351,7 @@ const ScanBagageScreen = () => {
                 (error.message?.includes('Network') || error.message?.includes('timeout'))
             ) {
                 await new Promise((r) => setTimeout(r, 1000));
-                return processScan(validationData, retryCount + 1);
+                return processScan(baggage, retryCount + 1);
             }
             await triggerHapticFeedback('error');
             Alert.alert(
@@ -313,8 +384,12 @@ const ScanBagageScreen = () => {
         setHasScannedOnce(true);
         lastScanTime.current = now;
         lastScannedData.current = data;
+
+        console.log("[SCAN] Scanné le QR code:", data);
+
         await Promise.all([playBeepSound(), triggerHapticFeedback('success')]);
         const validationData = await verifyQRCodeApi(data);
+        console.log("[SCAN] Validation data:", validationData);
         if (!validationData) {
             setLoadingScanProcess(false);
             setScanned(false);
@@ -333,7 +408,11 @@ const ScanBagageScreen = () => {
             return;
         }
         setDetectedQRs((prev) => [...prev.slice(-4), { data: data.substring(0, 20), inZone: true, timestamp: now }]);
-        await processScan(validationData);
+        // await processScan(validationData);
+        router.push({
+            pathname: '/scan-luggage-result',
+            params: { luggageData: JSON.stringify(validationData) },
+        });
     };
 
     const toggleTorch = () => {

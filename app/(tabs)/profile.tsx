@@ -4,7 +4,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ThemePreference, useThemePreference } from '@/hooks/use-theme-preference';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { CommonActions } from '@react-navigation/native';
+import { router, useNavigation } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -55,7 +56,7 @@ export default function ProfileScreen() {
     const borderColor = isDark ? '#3A3A3C' : '#E0E0E0';
     const separatorColor = isDark ? '#3A3A3C' : '#E5E5E5';
     const buttonDangerColor = '#FF3B30';
-
+    const navigation = useNavigation<any>();
     /**
      * Gère la déconnexion de l'utilisateur
      */
@@ -83,9 +84,22 @@ export default function ProfileScreen() {
                                 'expires_in',
                                 'token_type',
                                 'user_id',
+                                'user_role',
                             ]);
-                            // Rediriger vers l'écran de connexion
-                            router.replace('/login');
+                            // Réinitialiser la pile sur le Stack racine (parent des tabs) pour empêcher le retour (iOS)
+                            const stackNav = navigation.getParent();
+                            if (stackNav) {
+                                stackNav.dispatch(
+                                    CommonActions.reset({
+                                        index: 0,
+                                        routes: [{ name: 'login/index' }],
+                                    })
+                                );
+                            } else {
+                                // router.replace('/login');
+                                router.dismissAll();
+                                router.replace('/login');
+                            }
                         } catch (error) {
                             console.error('Erreur lors de la déconnexion:', error);
                             Alert.alert('Erreur', 'Une erreur est survenue lors de la déconnexion');

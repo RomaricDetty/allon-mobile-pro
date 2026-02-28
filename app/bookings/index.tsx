@@ -362,6 +362,7 @@ export default function BookingsScreen() {
             }
 
             const response = await getBookingsByDepartureIdApi(queryParams, token);
+            console.log('response loading bookings ===> ', response.data);
             const data: PaginatedResponse = response.data;
 
             if (data?.items && Array.isArray(data.items)) {

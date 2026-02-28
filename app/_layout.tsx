@@ -31,6 +31,7 @@ function AppContent() {
                 <Stack.Screen name="login/forgot-password" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-qr/index" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-bagage/index" options={{ headerShown: false }} />
+                <Stack.Screen name="scan-luggage-result/index" options={{ headerShown: false }} />
                 <Stack.Screen name="scan-result/index" options={{ headerShown: false }} />
                 <Stack.Screen name="register-baggage/index" options={{ headerShown: false }} />
                 <Stack.Screen name="register-baggage/add" options={{ headerShown: false }} />
