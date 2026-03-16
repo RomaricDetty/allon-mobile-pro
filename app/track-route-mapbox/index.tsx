@@ -11,8 +11,10 @@ import { styles } from "@/styles/track-route";
 import { Camera, LineLayer, MapView, MarkerView, setAccessToken, ShapeSource } from "@rnmapbox/maps";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Image, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Animated, Image, StyleSheet, View, Alert } from "react-native";
 import { getMapboxAccessToken } from "./constants";
+import { socketService, locationTrackingService } from "@/services";
+import * as Location from "expo-location";
 
 /** Écran de suivi de trajet avec Mapbox – position du conducteur en temps réel */
 export default function TrackRouteMapboxScreen() {
@@ -36,6 +38,8 @@ export default function TrackRouteMapboxScreen() {
     const actionSlideAnim = useRef(new Animated.Value(0)).current;
     const [routeCoordinates, setRouteCoordinates] = useState<[number, number][] | null>(null);
     const [routeLoading, setRouteLoading] = useState(false);
+    const [socketConnected, setSocketConnected] = useState(false);
+    const trackingInitializedRef = useRef(false);
 
     useEffect(() => {
         try {
@@ -44,6 +48,182 @@ export default function TrackRouteMapboxScreen() {
             // Token déjà défini par le plugin natif
         }
     }, []);
+
+    /**
+     * Initialiser et maintenir la connexion Socket.IO
+     * La connexion reste active même si on quitte l'écran
+     */
+    useEffect(() => {
+        const initSocket = async () => {
+            try {
+                if (!socketService.connected) {
+                    await socketService.connect();
+                    setSocketConnected(true);
+                    console.log('[TrackRoute] Socket connecté');
+                } else {
+                    // Socket déjà connecté (retour sur l'écran)
+                    setSocketConnected(true);
+                    console.log('[TrackRoute] Socket déjà connecté');
+                }
+            } catch (error) {
+                console.error('[TrackRoute] Erreur connexion socket:', error);
+                setSocketConnected(false);
+            }
+        };
+
+        initSocket();
+
+        // Écouter les événements de connexion
+        const unsubscribeSuccess = socketService.on('connection:success', () => {
+            setSocketConnected(true);
+            console.log('[TrackRoute] Socket reconnecté');
+        });
+
+        const unsubscribeLost = socketService.on('connection:lost', () => {
+            setSocketConnected(false);
+            console.warn('[TrackRoute] Socket déconnecté');
+            
+            // Tenter une reconnexion après 2 secondes
+            setTimeout(() => {
+                if (!socketService.connected) {
+                    console.log('[TrackRoute] Tentative de reconnexion...');
+                    socketService.connect().catch((err: unknown) => {
+                        console.error('[TrackRoute] Échec reconnexion:', err);
+                    });
+                }
+            }, 2000);
+        });
+
+        const unsubscribeError = socketService.on('connection:error', (data: any) => {
+            console.error('[TrackRoute] Erreur socket:', data.error);
+        });
+
+        return () => {
+            unsubscribeSuccess();
+            unsubscribeLost();
+            unsubscribeError();
+            // NE PAS déconnecter le socket ici pour maintenir le tracking
+            // socketService.disconnect(); 
+        };
+    }, []);
+
+    /**
+     * Démarrer le tracking GPS et Socket.IO quand le trajet démarre
+     * Le tracking continue même si on quitte l'écran
+     */
+    useEffect(() => {
+        const startTracking = async () => {
+            // Vérifier si le tracking est déjà actif (retour sur l'écran)
+            const isAlreadyTracking = locationTrackingService.tracking;
+            
+            if (departure.isRouteStarted && departure.departure) {
+                const busId = departure.departure.id;
+                
+                if (!busId) {
+                    console.error('[TrackRoute] Bus ID manquant');
+                    return;
+                }
+
+                // Si le tracking est déjà actif pour ce bus, ne rien faire
+                if (isAlreadyTracking && locationTrackingService.activeBusId === String(busId)) {
+                    console.log('[TrackRoute] Tracking déjà actif pour le bus:', busId);
+                    trackingInitializedRef.current = true;
+                    return;
+                }
+
+                // Si le tracking n'est pas encore initialisé
+                if (!trackingInitializedRef.current) {
+                    try {
+                        // Vérifier les permissions
+                        const hasPermission = await locationTrackingService.hasPermissions();
+                        if (!hasPermission) {
+                            const granted = await locationTrackingService.requestPermissions();
+                            if (!granted) {
+                                Alert.alert(
+                                    'Permission requise',
+                                    'L\'application a besoin d\'accéder à votre position pour partager votre trajet en temps réel.'
+                                );
+                                return;
+                            }
+                        }
+
+                        // Vérifier la connexion socket
+                        if (!socketService.connected) {
+                            console.log('[TrackRoute] Connexion socket avant tracking...');
+                            await socketService.connect();
+                        }
+
+                        // Démarrer le tracking
+                        const success = await locationTrackingService.startTracking({
+                            busId: String(busId),
+                            accuracy: Location.Accuracy.BestForNavigation,
+                            distanceInterval: 10, // Envoyer tous les 10 mètres
+                            timeInterval: 5000, // Ou toutes les 5 secondes
+                        });
+
+                        if (success) {
+                            trackingInitializedRef.current = true;
+                            console.log('[TrackRoute] Tracking démarré pour le bus:', busId);
+                        } else {
+                            Alert.alert(
+                                'Erreur',
+                                'Impossible de démarrer le partage de position. Vérifiez vos paramètres de localisation.'
+                            );
+                        }
+                    } catch (error) {
+                        console.error('[TrackRoute] Erreur démarrage tracking:', error);
+                        Alert.alert(
+                            'Erreur',
+                            'Une erreur est survenue lors du démarrage du tracking.'
+                        );
+                    }
+                }
+            }
+        };
+
+        startTracking();
+    }, [departure.isRouteStarted, departure.departure]);
+
+    /**
+     * Arrêter le tracking UNIQUEMENT quand le trajet est terminé
+     * NE PAS arrêter quand on quitte l'écran pour maintenir le tracking en arrière-plan
+     */
+    useEffect(() => {
+        if (departure.status.isArrived && trackingInitializedRef.current) {
+            locationTrackingService.stopTracking();
+            trackingInitializedRef.current = false;
+            console.log('[TrackRoute] Tracking arrêté (trajet terminé)');
+            
+            // Optionnel : déconnecter le socket après un délai
+            setTimeout(() => {
+                if (!locationTrackingService.tracking) {
+                    socketService.disconnect();
+                    console.log('[TrackRoute] Socket déconnecté (trajet terminé)');
+                }
+            }, 5000);
+        }
+    }, [departure.status.isArrived]);
+
+    /**
+     * Synchroniser l'état de l'indicateur avec le tracking réel
+     */
+    useEffect(() => {
+        // Vérifier périodiquement l'état du tracking
+        const interval = setInterval(() => {
+            const isTracking = locationTrackingService.tracking;
+            const isConnected = socketService.connected;
+            
+            if (isTracking !== trackingInitializedRef.current) {
+                trackingInitializedRef.current = isTracking;
+            }
+            
+            if (isConnected !== socketConnected) {
+                setSocketConnected(isConnected);
+            }
+        }, 2000);
+
+        return () => clearInterval(interval);
+    }, [socketConnected]);
 
     const colors = useMemo(
         () => ({
@@ -58,7 +238,13 @@ export default function TrackRouteMapboxScreen() {
     );
 
     const handleBack = useCallback(() => {
+        // Arrêter uniquement le tracking GPS local de l'écran
         stopTracking();
+        
+        // NE PAS arrêter le tracking Socket.IO pour maintenir le partage de position
+        // Le tracking continue en arrière-plan
+        console.log('[TrackRoute] Retour - Tracking Socket.IO maintenu en arrière-plan');
+        
         router.back();
     }, [stopTracking]);
 
@@ -84,7 +270,7 @@ export default function TrackRouteMapboxScreen() {
     /** Récupère l'itinéraire routier (routes praticables) via l'API Mapbox Directions */
     const trip = departure.departure?.trip;
     const fromCoord = useMemo((): [number, number] | null => {
-        const from = trip?.coordinate;
+        const from = trip?.stationFrom?.coordinate;
         if (!from) return null;
         const lat = typeof from.latitude === "number" ? from.latitude : Number(from.latitude);
         const lng = typeof from.longitude === "number" ? from.longitude : Number(from.longitude);
@@ -183,6 +369,15 @@ export default function TrackRouteMapboxScreen() {
                         </ThemedText>
                     </View>
                 )}
+                {/* Indicateur de tracking actif */}
+                {(trackingInitializedRef.current || locationTrackingService.tracking) && (
+                    <View style={[trackingIndicatorStyles.container, { backgroundColor: colors.modalBg }]}>
+                        <View style={[trackingIndicatorStyles.dot, { backgroundColor: socketConnected ? '#4CAF50' : '#FF9800' }]} />
+                        <ThemedText style={[trackingIndicatorStyles.text, { color: colors.modalText }]}>
+                            {socketConnected ? 'Position partagée en temps réel' : 'Reconnexion...'}
+                        </ThemedText>
+                    </View>
+                )}
                 <MapView
                     style={styles.map}
                     styleURL={undefined}
@@ -258,4 +453,33 @@ export default function TrackRouteMapboxScreen() {
 
 const routeMarkerStyles = StyleSheet.create({
     flag: { width: 36, height: 36 },
+});
+
+const trackingIndicatorStyles = StyleSheet.create({
+    container: {
+        position: 'absolute',
+        top: 60,
+        left: 16,
+        right: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    dot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        marginRight: 10,
+    },
+    text: {
+        fontSize: 14,
+        fontWeight: '500',
+    },
 });
