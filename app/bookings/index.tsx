@@ -5,12 +5,13 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
     RefreshControl,
     StyleSheet,
+    Text,
     TouchableOpacity,
     View
 } from 'react-native';
@@ -283,7 +284,20 @@ export default function BookingsScreen() {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
-    const params = useLocalSearchParams<{ departureId: string }>();
+    const params = useLocalSearchParams<{ departureId: string; departureTrips: string }>();
+
+    const departureTrips = useMemo<any[] | null>(() => {
+        try {
+            if (params.departureTrips) {
+                return JSON.parse(params.departureTrips) as any[];
+            }
+        } catch (error) {
+            console.error('Erreur lors du parsing des données des trajets du départ:', error);
+        }
+        return null;
+    }, [params.departureTrips]);
+
+    console.log('departureTrips ===> ', departureTrips);
 
     const [bookings, setBookings] = useState<ApiBooking[]>([]);
     const [loading, setLoading] = useState(true);
@@ -467,6 +481,7 @@ export default function BookingsScreen() {
             pathname: '/booking-details',
             params: {
                 bookingData: JSON.stringify(bookingData),
+                departureTrips: JSON.stringify(departureTrips),
             },
         });
     }, []);
@@ -521,26 +536,26 @@ export default function BookingsScreen() {
                     {/* Date et heure de départ */}
                     {(item.departureDateTime || item.departure?.departureDateTime) && (
                         <View style={styles.infoRow}>
-                            <ThemedText style={[styles.infoLabel, { color: labelTextColor }]}>
+                            <Text style={[styles.infoLabel, { color: labelTextColor }]}>
                                 Départ
-                            </ThemedText>
-                            <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                            </Text>
+                            <Text style={[styles.infoValue, { color: primaryTextColor }]}>
                                 {formatDate(item.departureDateTime || item.departure?.departureDateTime)}
                                 {' à '}
                                 {item.departureTime || formatTime(item.departureDateTime || item.departure?.departureDateTime)}
-                            </ThemedText>
+                            </Text>
                         </View>
                     )}
 
                     {/* Montant total */}
                     {item.totalAmount && (
                         <View style={styles.infoRow}>
-                            <ThemedText style={[styles.infoLabel, { color: labelTextColor }]}>
+                            <Text style={[styles.infoLabel, { color: labelTextColor }]}>
                                 Montant
-                            </ThemedText>
-                            <ThemedText style={[styles.infoValue, { color: primaryTextColor }]}>
+                            </Text>
+                            <Text style={[styles.infoValue, { color: primaryTextColor }]}>
                                 {formatAmount(item.totalAmount, item.currency)}
-                            </ThemedText>
+                            </Text>
                         </View>
                     )}
 
@@ -589,7 +604,7 @@ export default function BookingsScreen() {
             return (
                 <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#F3F3F7' }]}>
                     <View style={styles.loadingContainer}>
-                        <ThemedText style={styles.loadingText}>Chargement des réservations...</ThemedText>
+                        <Text style={styles.loadingText}>Chargement des réservations...</Text>
                     </View>
                 </View>
             );
@@ -598,14 +613,14 @@ export default function BookingsScreen() {
         if (error) {
             return (
                 <View style={styles.errorContainer}>
-                    <ThemedText style={styles.errorText}>{error}</ThemedText>
+                    <Text style={styles.errorText}>{error}</Text>
                 </View>
             );
         }
 
         return (
             <View style={styles.emptyContainer}>
-                <ThemedText style={styles.emptyText}>Aucune réservation disponible</ThemedText>
+                <Text style={styles.emptyText}>Aucune réservation disponible</Text>
             </View>
         );
     };
@@ -634,11 +649,11 @@ export default function BookingsScreen() {
                         <MaterialIcons name="arrow-back" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
                     </TouchableOpacity>
                     <View style={styles.headerTitleContainer}>
-                        <ThemedText type="title" style={styles.title}>Réservations</ThemedText>
+                        <Text style={[styles.title, { color: isDark ? '#FFFFFF' : '#000000' }]}>Réservations</Text>
                         {(departureCity || arrivalCity) && (
-                            <ThemedText style={[styles.routeInfo, { color: secondaryTextColor }]}>
+                            <Text style={[styles.routeInfo, { color: secondaryTextColor }]}>
                                 {departureCity || '--'} → {arrivalCity || '--'}
-                            </ThemedText>
+                            </Text>
                         )}
                     </View>
                     <View style={styles.backButton} />

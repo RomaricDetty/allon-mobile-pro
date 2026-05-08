@@ -226,7 +226,7 @@ export default function HomeScreen() {
             console.log('queryParams ===> ', queryParams);
 
             const response = await getUserDeparturesApi(queryParams, token);
-            console.log('response loading departures ===> ', response);
+            console.log('response loading departures trips ===> ', JSON.stringify(response.data.items[0]?.trips));
             const data: PaginatedResponse = response.data;
 
             console.log('data received ==>', data);
@@ -479,7 +479,7 @@ export default function HomeScreen() {
                 }
                 return 'Date spécifique';
             default:
-                return 'Tous les trajets';
+                return 'Tous les départs';
         }
     };
 
@@ -542,7 +542,7 @@ export default function HomeScreen() {
             return (
                 <View style={[styles.loadingContainer, { height: availableHeight }]}>
                     <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
-                    <ThemedText style={styles.loadingText}>Chargement de vos trajets...</ThemedText>
+                    <ThemedText style={styles.loadingText}>Chargement de vos départs...</ThemedText>
                 </View>
             );
         }
@@ -557,7 +557,7 @@ export default function HomeScreen() {
 
         return (
             <View style={styles.emptyContainer}>
-                <ThemedText style={styles.emptyText}>Aucun trajet disponible</ThemedText>
+                <ThemedText style={styles.emptyText}>Aucun départ disponible</ThemedText>
             </View>
         );
     };
@@ -567,7 +567,7 @@ export default function HomeScreen() {
      */
     const filterOptions = useMemo<{ type: DateFilterType; label: string }[]>(
         () => [
-            { type: 'all', label: 'Tous les trajets' },
+            { type: 'all', label: 'Tous les départs' },
             { type: 'today', label: "Aujourd'hui" },
             { type: 'thisWeek', label: 'Cette semaine' },
             { type: 'thisMonth', label: 'Ce mois' },

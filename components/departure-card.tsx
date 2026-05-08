@@ -10,6 +10,7 @@ import { ThemedView } from './themed-view';
  * Interface pour les données d'un départ
  */
 export interface Departure {
+    departureTripId?: string;
     id: string;
     company?: string;
     busType?: string;
@@ -50,6 +51,33 @@ export interface Departure {
             coordinate?: { latitude?: number; longitude?: number };
         };
     };
+    trips?: [{
+        departureTripId?: string;
+        isPrimary?: boolean;
+        trip?: {
+            id?: string;
+            label?: string;
+            stationFrom?: {
+                id?: string;
+                name?: string;
+                city?: string;
+                coordinate?: { latitude?: number; longitude?: number };
+                address?: string;
+            };
+            stationTo?: {
+                id?: string;
+                name?: string;
+                city?: string;
+                address?: string;
+                coordinate?: { latitude?: number; longitude?: number };
+            };
+            durationMinutes?: number;
+            basePrice?: number;
+            calculatedPrice?: number;
+            distanceKm?: number;
+        }
+
+    }];
 }
 
 /**

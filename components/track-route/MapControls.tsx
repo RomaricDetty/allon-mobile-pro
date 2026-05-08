@@ -1,8 +1,8 @@
 import { ThemedText } from "@/components/themed-text";
+import { styles } from "@/styles/track-route";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import { TouchableOpacity, View } from "react-native";
-import { styles } from "@/styles/track-route";
 
 const CONTROL_BUTTONS = [
     { icon: "locate" as const, key: "locate" },
@@ -75,7 +75,7 @@ export function MapControls({
                 )}
                 {isArrived ? (
                     <View style={[styles.floatingButton, { backgroundColor: "#34C759", opacity: 0.7 }]}>
-                        <ThemedText style={styles.floatingButtonText}>Trajet terminé</ThemedText>
+                        <ThemedText style={styles.floatingButtonText}>Départ terminé</ThemedText>
                     </View>
                 ) : (
                     <TouchableOpacity
@@ -85,7 +85,7 @@ export function MapControls({
                         disabled={!canStartRoute && !isDeparted}
                     >
                         <ThemedText style={styles.floatingButtonText}>
-                            {isDeparted ? "Terminer le trajet" : isRouteStarted ? "Terminer le trajet" : isScheduled ? "Choisir une action" : "Démarrer le trajet"}
+                            {isDeparted ? "Terminer le départ" : isRouteStarted ? "Terminer le départ" : isScheduled ? "Choisir une action" : "Démarrer le départ"}
                         </ThemedText>
                     </TouchableOpacity>
                 )}

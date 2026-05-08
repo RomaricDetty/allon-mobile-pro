@@ -1,8 +1,8 @@
 import { ThemedText } from "@/components/themed-text";
+import { styles } from "@/styles/track-route";
 import { MaterialIcons } from "@expo/vector-icons";
 import React, { useEffect } from "react";
 import { Animated, Modal, TouchableOpacity, View } from "react-native";
-import { styles } from "@/styles/track-route";
 
 interface ActionModalProps {
     visible: boolean;
@@ -15,7 +15,7 @@ interface ActionModalProps {
     colors: { modalBg: string; modalText: string; closeButtonBg: string };
 }
 
-/** Modal de choix d'action (embarquement / démarrer le trajet) */
+/** Modal de choix d'action (embarquement / démarrer le départ) */
 export function ActionModal({
     visible,
     onClose,
@@ -49,7 +49,7 @@ export function ActionModal({
                     {canStartRoute && (
                         <TouchableOpacity style={[styles.bottomSheetButton, { backgroundColor: "#43b860" }]} onPress={onStartRoute} activeOpacity={0.8}>
                             <MaterialIcons name="play-arrow" size={24} color="#FFFFFF" />
-                            <ThemedText style={styles.bottomSheetButtonText}>Démarrer le trajet</ThemedText>
+                            <ThemedText style={styles.bottomSheetButtonText}>Démarrer le départ</ThemedText>
                         </TouchableOpacity>
                     )}
                     <TouchableOpacity style={[styles.bottomSheetCloseButton, { backgroundColor: colors.closeButtonBg }]} onPress={onClose} activeOpacity={0.8}>

@@ -320,8 +320,8 @@ L'application utilise **Expo Router** avec un routage basé sur les fichiers :
 - Filtrage des positions GPS (qualité, distance, vitesse)
 - Actions disponibles :
   - Marquer comme "En embarquement" (Boarding)
-  - Démarrer le trajet (Départ)
-  - Terminer le trajet (Arrivé)
+  - Démarrer le depart (Départ)
+  - Terminer le depart (Arrivé)
 - Modales de confirmation pour les actions
 - Gestion des permissions de localisation
 - Optimisation de la batterie (filtrage des positions)

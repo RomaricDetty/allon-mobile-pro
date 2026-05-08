@@ -291,4 +291,58 @@ export const styles = StyleSheet.create({
         fontFamily: 'Ubuntu_Medium',
         flex: 1,
     },
+    sheetOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    sheetBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    },
+    sheetContainer: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 24,
+        gap: 12,
+    },
+    sheetHandle: {
+        width: 44,
+        height: 5,
+        borderRadius: 4,
+        alignSelf: 'center',
+        marginBottom: 6,
+    },
+    sheetTitle: {
+        fontSize: 18,
+        fontFamily: 'Ubuntu_Bold',
+    },
+    sheetSubtitle: {
+        fontSize: 13,
+        fontFamily: 'Ubuntu_Regular',
+        marginBottom: 4,
+    },
+    sheetOptionButton: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 12,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+    },
+    sheetOptionContent: {
+        flex: 1,
+        gap: 4,
+    },
+    sheetOptionTitle: {
+        fontSize: 15,
+        fontFamily: 'Ubuntu_Bold',
+    },
+    sheetOptionDescription: {
+        fontSize: 13,
+        fontFamily: 'Ubuntu_Regular',
+    },
 });

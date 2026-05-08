@@ -168,6 +168,33 @@ export interface ApiDeparture {
     status: string;
     delayMinutes?: number | null;
     delayReason?: string | null;
+    trips?: Array<{
+        departureTripId?: string;
+        isPrimary?: boolean;
+        trip?: {
+            id?: string;
+            label?: string;
+            stationFrom?: {
+                id?: string;
+                name?: string;
+                city?: string;
+                coordinate?: { latitude?: number; longitude?: number };
+                address?: string;
+            };
+            stationTo?: {
+                id?: string;
+                name?: string;
+                city?: string;
+                address?: string;
+                coordinate?: { latitude?: number; longitude?: number };
+            };
+            durationMinutes?: number;
+            basePrice?: number;
+            calculatedPrice?: number;
+            distanceKm?: number;
+        }
+
+    }>;
 }
 
 /**
@@ -334,5 +361,6 @@ export const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): an
         status: statusText,
         busLicensePlate: apiDeparture.bus.licencePlate,
         trip: tripForDeparture,
+        trips: apiDeparture.trips,
     };
 };

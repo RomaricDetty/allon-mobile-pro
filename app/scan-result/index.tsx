@@ -245,6 +245,40 @@ export default function ScanResultScreen() {
         });
     };
 
+    /** Identifiants des billets pouvant être validés (canValidate) */
+    const validatableBookingItemIds = React.useMemo(
+        () =>
+            booking.items
+                ?.filter((item: any) => item.canValidate === true)
+                .map((item: any) => item.id as string)
+                .filter(Boolean) ?? [],
+        [booking.items]
+    );
+
+    /** Indique si tous les billets validables sont cochés */
+    const allValidatableTicketsSelected = React.useMemo(
+        () =>
+            validatableBookingItemIds.length > 0 &&
+            validatableBookingItemIds.every((id) => selectedItems.has(id)),
+        [validatableBookingItemIds, selectedItems]
+    );
+
+    /**
+     * Coche ou décoche tous les billets validables en une fois.
+     */
+    const toggleSelectAllValidatableTickets = React.useCallback(() => {
+        if (validatableBookingItemIds.length === 0) return;
+        if (allValidatableTicketsSelected) {
+            setSelectedItems((prev) => {
+                const next = new Set(prev);
+                validatableBookingItemIds.forEach((id) => next.delete(id));
+                return next;
+            });
+        } else {
+            setSelectedItems(new Set(validatableBookingItemIds));
+        }
+    }, [validatableBookingItemIds, allValidatableTicketsSelected]);
+
     /**
      * Valide les billets sélectionnés
      */
@@ -292,13 +326,15 @@ export default function ScanResultScreen() {
                                 departureId,
                             };
 
-                            // Cas 1 : Un seul élément sélectionné OU tous les éléments validables sont sélectionnés
-                            if (selectedCount === 1 || selectedCount === totalValidatableCount) {
+                            // validateAll uniquement si tous les billets validables sont sélectionnés (pas quand un seul est choisi parmi plusieurs)
+                            if (totalValidatableCount > 0 && selectedCount === totalValidatableCount) {
                                 requestBody.validateAll = true;
                             } else {
-                                // Cas 2 : Plusieurs éléments sélectionnés mais pas tous
                                 requestBody.itemIds = Array.from(selectedItems);
                             }
+
+                            // console.log('requestBody dans le handleValidateItems: ', JSON.stringify(requestBody));
+                            // return false
 
                             const response = await axios.post(
                                 `${baseUrl}/bookings/${booking.id}/validate-items`,
@@ -534,7 +570,32 @@ export default function ScanResultScreen() {
                         <>
                             <View style={styles.section}>
                                 <ThemedText style={[styles.sectionTitle, { color: colors.primaryText }]}>Liste des billets ({booking.items.length})</ThemedText>
-                                
+
+                                {canValidateTickets && validatableBookingItemIds.length > 1 && (
+                                    <TouchableOpacity
+                                        activeOpacity={0.7}
+                                        onPress={toggleSelectAllValidatableTickets}
+                                        style={[styles.selectAllRow, { borderColor: colors.border, backgroundColor: colors.itemCardBg }]}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.selectionCheckbox,
+                                                {
+                                                    backgroundColor: allValidatableTicketsSelected ? '#1776BA' : 'transparent',
+                                                    borderColor: allValidatableTicketsSelected ? '#1776BA' : colors.border,
+                                                },
+                                            ]}
+                                        >
+                                            {allValidatableTicketsSelected && (
+                                                <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                                            )}
+                                        </View>
+                                        <ThemedText style={[styles.selectAllLabel, { color: colors.primaryText }]}>
+                                            Tout sélectionner ({validatableBookingItemIds.length} billet{validatableBookingItemIds.length > 1 ? 's' : ''})
+                                        </ThemedText>
+                                    </TouchableOpacity>
+                                )}
+
                                 {booking.items.map((item: any, index: number) => {
                                     const isSelected = selectedItems.has(item.id);
                                     const canSelect = item.canValidate === true && canValidateTickets;
@@ -592,7 +653,7 @@ export default function ScanResultScreen() {
                                                     { label: 'Passager', value: item.firstName && item.lastName ? `${item.firstName} ${item.lastName}` : '--' },
                                                     { label: 'Numéro de siège', value: item.seatNumber || '--' },
                                                     { label: 'Type de passager', value: getPassengerTypeLabel(item.passengerType) },
-                                                    { label: 'Type de trajet', value: getLegLabel(item.leg) },
+                                                    { label: 'Type de départ', value: getLegLabel(item.leg) },
                                                 ].map(({ label, value }) => (
                                                     <View key={label} style={styles.detailRow}>
                                                         <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>{label}</ThemedText>
@@ -627,7 +688,7 @@ export default function ScanResultScreen() {
                     {/* Section : Type de trajet */}
                     <View style={styles.section}>
                         <View style={styles.detailRow}>
-                            <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Type de trajet</ThemedText>
+                            <ThemedText style={[styles.detailLabel, { color: colors.labelText }]}>Type de départ</ThemedText>
                             <ThemedText style={[styles.detailValue, { color: colors.primaryText }]}>{getTripTypeLabel(booking.tripType)}</ThemedText>
                         </View>
                     </View>

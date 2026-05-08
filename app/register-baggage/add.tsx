@@ -40,6 +40,7 @@ interface LuggageItem {
     estimatedDimensions: LuggageDimensions;
     description: string;
     isFragile: boolean;
+    price?: number;
 }
 
 /**
@@ -50,6 +51,7 @@ interface RegisterLuggagePayload {
     bookingId: string;
     departureId: string;
     items: LuggageItem[];
+    departureTripId: string;
 }
 
 /**
@@ -64,7 +66,10 @@ export default function AddBaggageScreen() {
         bookingItemId: string;
         departureId: string;
         bookingId: string;
+        departureTripId: string;
     }>();
+
+    console.log('params ===>, ', JSON.stringify(params));
 
     const [luggageItems, setLuggageItems] = useState<LuggageItem[]>([]);
     const [currentFormIndex, setCurrentFormIndex] = useState<number | null>(null);
@@ -152,22 +157,6 @@ export default function AddBaggageScreen() {
             Alert.alert('Erreur', 'Veuillez sélectionner un type de bagage.');
             return false;
         }
-        if (formData.estimatedWeight <= 0) {
-            Alert.alert('Erreur', 'Veuillez saisir un poids valide.');
-            return false;
-        }
-        if (
-            formData.estimatedDimensions.length <= 0 ||
-            formData.estimatedDimensions.width <= 0 ||
-            formData.estimatedDimensions.height <= 0
-        ) {
-            Alert.alert('Erreur', 'Veuillez saisir toutes les dimensions.');
-            return false;
-        }
-        if (!formData.description.trim()) {
-            Alert.alert('Erreur', 'Veuillez saisir une description.');
-            return false;
-        }
         return true;
     };
 
@@ -234,6 +223,10 @@ export default function AddBaggageScreen() {
             Alert.alert('Erreur', 'Veuillez ajouter au moins un bagage avant d\'enregistrer.');
             return;
         }
+        if (!params.departureTripId) {
+            Alert.alert('Erreur', 'Veuillez sélectionner un trajet avant d\'enregistrer le bagage.');
+            return;
+        }
 
         try {
             setIsSubmitting(true);
@@ -247,7 +240,10 @@ export default function AddBaggageScreen() {
                 bookingId: params.bookingId,
                 departureId: params.departureId,
                 items: luggageItems,
+                departureTripId: params.departureTripId,
             };
+
+            console.log('payload RegisterLuggagePayload ===>, ', JSON.stringify(payload));
 
             const response = await axios.post(`${baseUrl}/luggage`, payload, {
                 headers: {
@@ -457,7 +453,7 @@ export default function AddBaggageScreen() {
                         {/* Poids estimé */}
                         <View style={styles.formField}>
                             <ThemedText style={[styles.formLabel, { color: labelTextColor }]}>
-                                Poids estimé (kg) *
+                                Poids estimé (kg)
                             </ThemedText>
                             <TextInput
                                 style={[
@@ -482,7 +478,7 @@ export default function AddBaggageScreen() {
                         {/* Dimensions */}
                         <View style={styles.formField}>
                             <ThemedText style={[styles.formLabel, { color: labelTextColor }]}>
-                                Dimensions (cm) *
+                                Dimensions (cm)
                             </ThemedText>
                             <View style={styles.dimensionsRow}>
                                 <View style={[styles.dimensionInput, { flex: 1 }]}>
@@ -570,7 +566,7 @@ export default function AddBaggageScreen() {
                         {/* Description */}
                         <View style={styles.formField}>
                             <ThemedText style={[styles.formLabel, { color: labelTextColor }]}>
-                                Description *
+                                Description
                             </ThemedText>
                             <TextInput
                                 style={[

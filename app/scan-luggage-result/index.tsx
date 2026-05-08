@@ -165,12 +165,12 @@ export default function ScanLuggageResultScreen() {
         if (!luggage) return;
         try {
             const token = await getToken();
-            if (!luggage.vehicleCompartment || !luggage.position) {
-                showError('Compartiment et position du bagage non disponibles.');
-                return;
-            }
+            // if (!luggage.vehicleCompartment || !luggage.position) {
+            //     showError('Compartiment et position du bagage non disponibles.');
+            //     return;
+            // }
             const response = await loadLuggageApi(
-                { vehicleCompartment: luggage.vehicleCompartment, position: luggage.position },
+                { vehicleCompartment: luggage.vehicleCompartment || null, position: luggage.position || null },
                 luggage.id,
                 token
             );

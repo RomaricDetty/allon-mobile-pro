@@ -39,7 +39,7 @@ export const DepartureHeader: React.FC<DepartureHeaderProps> = ({ onBack, isDark
                 </TouchableOpacity>
 
                 <ThemedText style={[styles.headerTitle, { color: '#FFFFFF' }]}>
-                    Détails du trajet
+                    Détails du départ
                 </ThemedText>
             </View>
         </View>

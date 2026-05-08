@@ -1,11 +1,11 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { styles } from '@/styles/homeScreen';
 import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { styles } from '@/styles/homeScreen';
 
 /**
  * Props du composant HomeHeader
@@ -46,7 +46,7 @@ export const HomeHeader: React.FC<HomeHeaderProps> = ({
                 onLayout?.(height);
             }}
         >
-            <ThemedText type="title" style={styles.title}>Mes trajets</ThemedText>
+            <ThemedText type="title" style={styles.title}>Mes départs</ThemedText>
 
             {/* Bouton de filtre */}
             <TouchableOpacity

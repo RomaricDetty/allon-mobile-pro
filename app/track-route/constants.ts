@@ -25,8 +25,8 @@ export interface LocationData {
 export type RouteAction = "boarding" | "startRoute" | "finishRoute";
 export const CONFIRM_MESSAGES: Record<RouteAction, string> = {
     boarding: "Êtes-vous sûr de vouloir démarrer l'embarquement ?",
-    finishRoute: "Êtes-vous sûr de vouloir terminer le trajet ?",
-    startRoute: "Êtes-vous sûr de vouloir démarrer le trajet ?",
+    finishRoute: "Êtes-vous sûr de vouloir terminer le départ ?",
+    startRoute: "Êtes-vous sûr de vouloir démarrer le départ ?",
 };
 export const ACTION_COLORS: Record<RouteAction, string> = {
     boarding: "#1776BA",

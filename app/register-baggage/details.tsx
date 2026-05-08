@@ -173,6 +173,41 @@ export default function LuggageDetailsScreen() {
         return true;
     }, [checkInData]);
 
+    /**
+     * Exécute l'appel API de check-in avec un payload donné.
+     */
+    const submitCheckIn = useCallback(
+        async (payload: Record<string, unknown>) => {
+            if (!luggage) return;
+            setIsLoading(true);
+            try {
+                const token = await AsyncStorage.getItem('token');
+                if (!token) throw new Error('Token non disponible');
+                const response = await axios.post(`${baseUrl}/luggage/${luggage.id}/check-in`, payload, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (response.data) {
+                    setLuggage({ ...luggage, ...response.data, status: response.data.status });
+                    const msg =
+                        response.data.oversizedFee > 0
+                            ? `Ce bagage nécessite le paiement de frais supplémentaires de ${response.data.oversizedFee} ${response.data.currency ?? 'XOF'}. Veuillez vous rendre à la caisse pour payer.`
+                            : 'Le check-in a été effectué avec succès.';
+                    Alert.alert(response.data.oversizedFee > 0 ? 'Frais supplémentaires' : 'Succès', msg, [
+                        { text: response.data.oversizedFee > 0 ? 'Fermer' : 'OK' },
+                    ]);
+                }
+            } catch (err: unknown) {
+                const message =
+                    (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+                    'Une erreur est survenue lors du check-in.';
+                Alert.alert('Erreur', message, [{ text: 'OK' }]);
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [luggage]
+    );
+
     const handleCheckIn = useCallback(() => {
         if (!luggage || !validateCheckInData()) return;
         const { weight, length, width, height } = checkInData;
@@ -187,47 +222,18 @@ export default function LuggageDetailsScreen() {
                 { text: 'Annuler', style: 'cancel' },
                 {
                     text: 'Confirmer',
-                    onPress: async () => {
-                        setIsLoading(true);
-                        try {
-                            const token = await AsyncStorage.getItem('token');
-                            if (!token) throw new Error('Token non disponible');
-                            const response = await axios.post(
-                                `${baseUrl}/luggage/${luggage.id}/check-in`,
-                                {
-                                    actualWeight: w,
-                                    actualDimensions: { length: l, width: wi, height: h, total: l * wi * h },
-                                    stationId: luggage.stationId || '',
-                                    description: checkInData.description || '',
-                                    isFragile: checkInData.isFragile,
-                                },
-                                { headers: { Authorization: `Bearer ${token}` } }
-                            );
-                            if (response.data) {
-                                setLuggage({ ...luggage, ...response.data, status: response.data.status });
-                                const msg =
-                                    response.data.oversizedFee > 0
-                                        ? `Ce bagage nécessite le paiement de frais supplémentaires de ${response.data.oversizedFee} ${response.data.currency ?? 'XOF'}. Veuillez vous rendre à la caisse pour payer.`
-                                        : 'Le check-in a été effectué avec succès.';
-                                Alert.alert(
-                                    response.data.oversizedFee > 0 ? 'Frais supplémentaires' : 'Succès',
-                                    msg,
-                                    [{ text: response.data.oversizedFee > 0 ? 'Fermer' : 'OK' }]
-                                );
-                            }
-                        } catch (err: unknown) {
-                            const message =
-                                (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-                                'Une erreur est survenue lors du check-in.';
-                            Alert.alert('Erreur', message, [{ text: 'OK' }]);
-                        } finally {
-                            setIsLoading(false);
-                        }
-                    },
+                    onPress: async () =>
+                        submitCheckIn({
+                            actualWeight: w,
+                            actualDimensions: { length: l, width: wi, height: h, total: l * wi * h },
+                            stationId: luggage.stationId || '',
+                            description: checkInData.description || '',
+                            isFragile: checkInData.isFragile,
+                        }),
                 },
             ]
         );
-    }, [luggage, checkInData, validateCheckInData]);
+    }, [luggage, checkInData, validateCheckInData, submitCheckIn]);
 
     const handlePrintReceipt = useCallback(() => {
         Alert.alert(

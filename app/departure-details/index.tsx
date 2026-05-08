@@ -124,7 +124,7 @@ export default function DepartureDetailsScreen() {
             console.log('userRole ===>, ', userRole);
 
             if (userRole?.toUpperCase() !== 'DRIVER' && userRole?.toUpperCase() !== 'DEPARTURE_SUPERVISOR') {
-                Alert.alert('Erreur', 'Vous n\'avez pas les permissions requises pour démarrer le trajet.');
+                Alert.alert('Erreur', 'Vous n\'avez pas les permissions requises pour démarrer le départ.');
                 return;
             }
 
@@ -138,7 +138,7 @@ export default function DepartureDetailsScreen() {
             });
         } catch (error) {
             console.error('Erreur lors du démarrage du trajet:', error);
-            Alert.alert('Erreur', 'Une erreur est survenue lors du démarrage du trajet. Veuillez réessayer.');
+            Alert.alert('Erreur', 'Une erreur est survenue lors du démarrage du départ. Veuillez réessayer.');
         }
     };
 
@@ -261,6 +261,7 @@ export default function DepartureDetailsScreen() {
             pathname: '/bookings',
             params: {
                 departureId: departure.id,
+                departureTrips: JSON.stringify(departure.trips),
             },
         });
     };

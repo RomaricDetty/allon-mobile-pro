@@ -176,6 +176,21 @@ export const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    selectAllRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 12,
+    },
+    selectAllLabel: {
+        fontSize: 15,
+        fontFamily: 'Ubuntu_Medium',
+        flex: 1,
+    },
     validationButtonContainer: {
         position: 'absolute',
         bottom: 0,

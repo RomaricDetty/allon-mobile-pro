@@ -21,7 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /** Données de réservation renvoyées par l’API */
 interface ApiBooking {
@@ -75,9 +75,12 @@ export default function BookingDetailsScreen() {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
-    const params = useLocalSearchParams<{ bookingData: string }>();
+    const params = useLocalSearchParams<{ bookingData: string; departureTrips: string }>();
     const [userRole, setUserRole] = useState<string | undefined>(undefined);
 
+    /**
+     * Récupère les données de la réservation
+     */
     const booking = useMemo<ApiBooking | null>(() => {
         try {
             if (params.bookingData) {
@@ -89,6 +92,23 @@ export default function BookingDetailsScreen() {
         }
         return null;
     }, [params.bookingData]);
+
+    /**
+     * Récupère les trajets du départ
+     */
+    const departureTrips = useMemo<any[] | null>(() => {
+
+        try {
+            if (params.departureTrips) {
+                return JSON.parse(params.departureTrips) as any[];
+            }
+        } catch (error) {
+            console.error('Erreur lors du parsing des données des trajets du départ:', error);
+        }
+        return null;
+    }, [params.departureTrips]);
+
+    console.log('departureTrips booking details ===> ', departureTrips);
 
     useEffect(() => {
         const loadRole = async () => {
@@ -155,6 +175,7 @@ export default function BookingDetailsScreen() {
                     bookingItemId: passengerOrItem?.id,
                     departureId,
                     bookingId,
+                    departureTrips: JSON.stringify(departureTrips),
                 },
             });
         },
@@ -184,7 +205,7 @@ export default function BookingDetailsScreen() {
     }
 
     return (
-        <View style={[styles.container, { backgroundColor: themeColors.backgroundColor }]}>
+        <SafeAreaView edges={['bottom']} style={[styles.container, { backgroundColor: themeColors.backgroundColor }]}>
             <ThemedView
                 style={[
                     styles.header,
@@ -361,7 +382,7 @@ export default function BookingDetailsScreen() {
                                             {passenger.firstName && renderDetailRow('Prénom', passenger.firstName)}
                                             {passenger.lastName && renderDetailRow('Nom', passenger.lastName)}
                                             {passenger.passengerType && renderDetailRow('Type passager', getPassengerTypeLabel(passenger.passengerType))}
-                                            {passenger.seatNumber && renderDetailRow('Siège', 'Nº'+ passenger.seatNumber)}
+                                            {passenger.seatNumber && renderDetailRow('Siège', 'Nº' + passenger.seatNumber)}
                                             {showBaggageButton && (
                                                 <View style={[styles.baggageButtonContainer, { borderTopColor: themeColors.separatorColor }]}>
                                                     <TouchableOpacity
@@ -443,6 +464,6 @@ export default function BookingDetailsScreen() {
                     )}
                 </View>
             </ScrollView>
-        </View>
+        </SafeAreaView>
     );
 }
