@@ -7,14 +7,17 @@ import { useDimensions } from "@/hooks/use-dimensions";
 import { useTrackRouteDeparture } from "@/hooks/use-track-route-departure";
 import { useTrackRouteLocation } from "@/hooks/use-track-route-location";
 import { useTrackRouteMapMapbox } from "@/hooks/use-track-route-map-mapbox";
+import { locationTrackingService, socketService } from "@/services";
 import { styles } from "@/styles/track-route";
+import { performPreTrackingChecks, showPermissionGuide } from "@/utils/permission-helper";
 import { Camera, LineLayer, MapView, MarkerView, setAccessToken, ShapeSource } from "@rnmapbox/maps";
+import * as Location from "expo-location";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Image, StyleSheet, View, Alert } from "react-native";
+import { ActivityIndicator, Alert, Animated, Image, StyleSheet, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getMapboxAccessToken } from "./constants";
-import { socketService, locationTrackingService } from "@/services";
-import * as Location from "expo-location";
+import { getRouteCoordinates } from "@/utils/route-calculator";
 
 /** Écran de suivi de trajet avec Mapbox – position du conducteur en temps réel */
 export default function TrackRouteMapboxScreen() {
@@ -113,70 +116,123 @@ export default function TrackRouteMapboxScreen() {
      */
     useEffect(() => {
         const startTracking = async () => {
+            console.log('[TrackRoute] Vérification conditions de tracking:', {
+                isRouteStarted: departure.isRouteStarted,
+                hasDeparture: !!departure.departure,
+                departureId: departure.departure?.id,
+                departureStatus: departure.departure?.status,
+                trackingInitialized: trackingInitializedRef.current,
+            });
+
             // Vérifier si le tracking est déjà actif (retour sur l'écran)
             const isAlreadyTracking = locationTrackingService.tracking;
+            console.log('[TrackRoute] État tracking service:', {
+                isAlreadyTracking,
+                activeBusId: locationTrackingService.activeBusId,
+            });
             
-            if (departure.isRouteStarted && departure.departure) {
-                const busId = departure.departure.id;
-                
-                if (!busId) {
-                    console.error('[TrackRoute] Bus ID manquant');
-                    return;
-                }
+            if (!departure.isRouteStarted || !departure.departure) {
+                console.log('[TrackRoute] Conditions non remplies pour démarrer le tracking:', {
+                    isRouteStarted: departure.isRouteStarted,
+                    hasDeparture: !!departure.departure,
+                    departureStatus: departure.departure?.status,
+                    reason: !departure.isRouteStarted 
+                        ? 'Route pas encore démarrée - Cliquez sur le bouton "Démarrer" pour commencer le tracking' 
+                        : 'Pas de données de départ',
+                });
+                return;
+            }
 
-                // Si le tracking est déjà actif pour ce bus, ne rien faire
-                if (isAlreadyTracking && locationTrackingService.activeBusId === String(busId)) {
-                    console.log('[TrackRoute] Tracking déjà actif pour le bus:', busId);
-                    trackingInitializedRef.current = true;
-                    return;
-                }
+            console.log('[TrackRoute] Conditions remplies: isRouteStarted=true, démarrage du tracking...');
+            
+            const busId = departure.departure.id;
+            
+            if (!busId) {
+                console.error('[TrackRoute] Bus ID manquant');
+                return;
+            }
 
-                // Si le tracking n'est pas encore initialisé
-                if (!trackingInitializedRef.current) {
+            // Si le tracking est déjà actif pour ce bus, ne rien faire
+            if (isAlreadyTracking && locationTrackingService.activeBusId === String(busId)) {
+                console.log('[TrackRoute] Tracking déjà actif pour le bus:', busId);
+                trackingInitializedRef.current = true;
+                return;
+            }
+
+            // Si le tracking n'est pas encore initialisé
+            if (!trackingInitializedRef.current) {
                     try {
-                        // Vérifier les permissions
-                        const hasPermission = await locationTrackingService.hasPermissions();
-                        if (!hasPermission) {
-                            const granted = await locationTrackingService.requestPermissions();
-                            if (!granted) {
+                        console.log('[TrackRoute] Initialisation du tracking pour le bus:', busId);
+                        
+                        // Vérification complète pré-tracking (GPS + permissions)
+                        console.log('[TrackRoute] Vérification complète des prérequis...');
+                        const preCheck = await performPreTrackingChecks();
+                        
+                        if (!preCheck.success) {
+                            console.error('[TrackRoute] Vérification échouée:', preCheck.message);
+                            Alert.alert(
+                                'Configuration requise',
+                                preCheck.message,
+                                [
+                                    { text: 'Annuler', style: 'cancel' },
+                                    { text: 'Voir le guide', onPress: showPermissionGuide },
+                                ]
+                            );
+                            return;
+                        }
+                        
+                        // Afficher un avertissement si permission background manquante
+                        if (preCheck.message) {
+                            console.warn('[TrackRoute]', preCheck.message);
+                        }
+                        
+                        console.log('[TrackRoute] Tous les prérequis sont remplis');
+
+                        // Vérifier la connexion socket
+                        console.log('[TrackRoute] Vérification connexion Socket.IO...');
+                        if (!socketService.connected) {
+                            console.log('[TrackRoute] Connexion socket avant tracking...');
+                            try {
+                                await socketService.connect();
+                                console.log('[TrackRoute] Socket: Connecté');
+                            } catch (err: unknown) {
+                                console.error('[TrackRoute] Échec de connexion socket:', err);
                                 Alert.alert(
-                                    'Permission requise',
-                                    'L\'application a besoin d\'accéder à votre position pour partager votre trajet en temps réel.'
+                                    'Erreur de connexion',
+                                    'Impossible de se connecter au serveur. Vérifiez votre connexion internet.'
                                 );
                                 return;
                             }
-                        }
-
-                        // Vérifier la connexion socket
-                        if (!socketService.connected) {
-                            console.log('[TrackRoute] Connexion socket avant tracking...');
-                            await socketService.connect();
+                        } else {
+                            console.log('[TrackRoute] Socket: Déjà connecté');
                         }
 
                         // Démarrer le tracking
+                        console.log('[TrackRoute] Démarrage du tracking GPS...');
                         const success = await locationTrackingService.startTracking({
                             busId: String(busId),
                             accuracy: Location.Accuracy.BestForNavigation,
                             distanceInterval: 10, // Envoyer tous les 10 mètres
-                            timeInterval: 5000, // Ou toutes les 5 secondes
+                            timeInterval: 5000, // OU toutes les 5 secondes (même à l'arrêt)
                         });
 
                         if (success) {
                             trackingInitializedRef.current = true;
-                            console.log('[TrackRoute] Tracking démarré pour le bus:', busId);
+                            console.log('[TrackRoute] Tracking démarré avec succès pour le bus:', busId);
+                            console.log('[TrackRoute] En attente des positions GPS...');
                         } else {
+                            console.error('[TrackRoute] Échec du démarrage du tracking');
                             Alert.alert(
                                 'Erreur',
                                 'Impossible de démarrer le partage de position. Vérifiez vos paramètres de localisation.'
                             );
                         }
-                    } catch (error) {
+                } catch (error) {
                         console.error('[TrackRoute] Erreur démarrage tracking:', error);
-                        Alert.alert(
-                            'Erreur',
-                            'Une erreur est survenue lors du démarrage du tracking.'
-                        );
-                    }
+                    Alert.alert(
+                        'Erreur',
+                        'Une erreur est survenue lors du démarrage du tracking.'
+                    );
                 }
             }
         };
@@ -267,8 +323,16 @@ export default function TrackRouteMapboxScreen() {
         if (!departure.departure) router.back();
     }, [departure.departure]);
 
-    /** Récupère l'itinéraire routier (routes praticables) via l'API Mapbox Directions */
+    /** Récupère l'itinéraire depuis l'objet trip ou calcule via Mapbox Directions */
     const trip = departure.departure?.trip;
+    
+    // Logger la structure complète du trip pour voir si un itinéraire existe
+    useEffect(() => {
+        if (trip) {
+            console.log('[TrackRoute] Structure du trip:', JSON.stringify(trip, null, 2));
+        }
+    }, [trip]);
+    
     const fromCoord = useMemo((): [number, number] | null => {
         const from = trip?.stationFrom?.coordinate;
         if (!from) return null;
@@ -277,6 +341,7 @@ export default function TrackRouteMapboxScreen() {
         if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
         return [lng, lat];
     }, [trip?.stationFrom?.coordinate]);
+    
     const toCoord = useMemo((): [number, number] | null => {
         const to = trip?.stationTo?.coordinate;
         if (!to) return null;
@@ -291,29 +356,31 @@ export default function TrackRouteMapboxScreen() {
             setRouteCoordinates(null);
             return;
         }
+        
         let cancelled = false;
         setRouteLoading(true);
         setRouteCoordinates(null);
-        const token = getMapboxAccessToken();
-        const coords = `${fromCoord[0]},${fromCoord[1]};${toCoord[0]},${toCoord[1]}`;
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${token}`;
-        fetch(url)
-            .then((res) => res.json())
-            .then((data: { routes?: { geometry?: { coordinates?: [number, number][] } }[] }) => {
-                if (cancelled) return;
-                const coordsRoute = data.routes?.[0]?.geometry?.coordinates;
-                if (Array.isArray(coordsRoute) && coordsRoute.length >= 2) {
-                    setRouteCoordinates(coordsRoute);
+        
+        getRouteCoordinates(trip, fromCoord, toCoord)
+            .then((coordinates) => {
+                if (!cancelled) {
+                    setRouteCoordinates(coordinates);
                 }
             })
-            .catch(() => {
-                if (!cancelled) setRouteCoordinates(null);
+            .catch((error) => {
+                if (!cancelled) {
+                    console.error('[TrackRoute] Erreur lors du calcul de l\'itinéraire:', error);
+                    setRouteCoordinates([fromCoord, toCoord]);
+                }
             })
             .finally(() => {
-                if (!cancelled) setRouteLoading(false);
+                if (!cancelled) {
+                    setRouteLoading(false);
+                }
             });
+        
         return () => { cancelled = true; };
-    }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1]]);
+    }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1], trip]);
 
     const centerCoord = map.toMapboxPosition(location.latitude, location.longitude);
 
@@ -342,7 +409,7 @@ export default function TrackRouteMapboxScreen() {
     if (!departure.departure) return null;
 
     return (
-        <View style={[styles.container, { backgroundColor: isDark ? "#000000" : "#F3F3F7" }]}>
+        <SafeAreaView style={[styles.container, { backgroundColor: isDark ? "#000000" : "#F3F3F7" }]} edges={["bottom"]}>
             <View style={styles.mapContainer}>
                 <MapControls
                     onLocate={map.getCurrentLocation}
@@ -383,8 +450,6 @@ export default function TrackRouteMapboxScreen() {
                     styleURL={undefined}
                     onDidFinishLoadingMap={map.onMapLoaded}
                     onCameraChanged={map.onCameraChanged}
-                    onRegionWillChange={map.onRegionChangeStart}
-                    onRegionDidChange={map.onRegionChangeComplete}
                     rotateEnabled
                     pitchEnabled={false}
                     zoomEnabled
@@ -447,7 +512,7 @@ export default function TrackRouteMapboxScreen() {
                     colors={colors}
                 />
             </View>
-        </View>
+        </SafeAreaView>
     );
 }
 

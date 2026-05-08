@@ -2,7 +2,7 @@
 
 Ce dossier contient tous les services nécessaires pour le tracking de position en temps réel des bus.
 
-## 📁 Structure
+## Structure
 
 ```
 services/
@@ -14,7 +14,7 @@ services/
     └── socket.service.test.ts
 ```
 
-## 🚀 Utilisation rapide
+## Utilisation rapide
 
 ### Import simple
 
@@ -49,7 +49,7 @@ await locationTrackingService.stopTracking();
 socketService.disconnect();
 ```
 
-## 📚 Services disponibles
+## Services disponibles
 
 ### 1. SocketService (`socket.service.ts`)
 
@@ -172,7 +172,7 @@ const { accuracy, distanceInterval, timeInterval } = TRACKING_PRESETS.NORMAL;
 const config = TRACKING_PRESETS.BATTERY_SAVER;
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Modifier l'URL du serveur
 
@@ -210,7 +210,7 @@ export const TRACKING_PRESETS = {
 };
 ```
 
-## 🔒 Sécurité
+## Sécurité
 
 ### Authentification
 
@@ -239,7 +239,7 @@ if (data.lat < -90 || data.lat > 90) return;
 if (data.lng < -180 || data.lng > 180) return;
 ```
 
-## 📊 Événements
+## Événements
 
 ### Événements Socket.IO
 
@@ -273,7 +273,7 @@ socketService.on('connection:success', (data) => {
 });
 ```
 
-## 🧪 Tests
+## Tests
 
 Pour exécuter les tests :
 
@@ -281,14 +281,14 @@ Pour exécuter les tests :
 npm test services/__tests__/socket.service.test.ts
 ```
 
-## 📖 Documentation complète
+## Documentation complète
 
 Pour plus d'informations, consultez :
 - [Guide complet](../docs/TRACKING_GUIDE.md)
 - [Exemples d'utilisation](../examples/TrackingExample.tsx)
 - [Types TypeScript](../types/tracking.types.ts)
 
-## 🐛 Dépannage
+## Dépannage
 
 ### Le service ne se connecte pas
 
@@ -326,7 +326,7 @@ if (!socketService.connected) {
 }
 ```
 
-## 🔗 Liens utiles
+## Liens utiles
 
 - [Expo Location](https://docs.expo.dev/versions/latest/sdk/location/)
 - [Socket.IO Client](https://socket.io/docs/v4/client-api/)

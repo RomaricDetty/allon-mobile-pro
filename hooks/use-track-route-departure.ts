@@ -34,10 +34,18 @@ export function useTrackRouteDeparture(
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [pendingAction, setPendingAction] = useState<ModalAction | null>(null);
     const [loadingAction, setLoadingAction] = useState<ModalAction | null>(null);
-    const [isRouteStarted, setIsRouteStarted] = useState(false);
+    // Initialiser isRouteStarted à true si le départ est déjà en statut DEPARTED
+    const [isRouteStarted, setIsRouteStarted] = useState(
+        initialDeparture?.status?.toUpperCase() === "DEPARTED"
+    );
 
     useEffect(() => {
         setDeparture(initialDeparture);
+        // Mettre à jour isRouteStarted si le statut est DEPARTED
+        if (initialDeparture?.status?.toUpperCase() === "DEPARTED") {
+            setIsRouteStarted(true);
+            console.log('[useTrackRouteDeparture] Trajet déjà démarré (statut DEPARTED)');
+        }
     }, [initialDeparture]);
 
     const status = useMemo(() => {
@@ -121,6 +129,17 @@ export function useTrackRouteDeparture(
     useEffect(() => {
         if (!status.isScheduled && showActionModal) setShowActionModal(false);
     }, [status.isScheduled, showActionModal]);
+
+    // Synchroniser isRouteStarted avec le statut DEPARTED
+    useEffect(() => {
+        if (status.isDeparted && !isRouteStarted) {
+            console.log('[useTrackRouteDeparture] Synchronisation: Statut DEPARTED détecté, activation de isRouteStarted');
+            setIsRouteStarted(true);
+        } else if (status.isArrived && isRouteStarted) {
+            console.log('[useTrackRouteDeparture] Synchronisation: Statut ARRIVED détecté, désactivation de isRouteStarted');
+            setIsRouteStarted(false);
+        }
+    }, [status.isDeparted, status.isArrived, isRouteStarted]);
 
     return {
         departure,

@@ -41,7 +41,12 @@
                 "android.permission.RECORD_AUDIO",
                 "android.permission.ACCESS_FINE_LOCATION",
                 "android.permission.ACCESS_COARSE_LOCATION",
-                "ACCESS_BACKGROUND_LOCATION"
+                "android.permission.ACCESS_BACKGROUND_LOCATION",
+                "android.permission.FOREGROUND_SERVICE",
+                "android.permission.FOREGROUND_SERVICE_LOCATION",
+                "android.permission.INTERNET",
+                "android.permission.ACCESS_NETWORK_STATE",
+                "android.permission.WAKE_LOCK"
             ],
             "package": "com.allonmobilepro"
         },
@@ -59,7 +64,11 @@
             [
                 "expo-location",
                 {
-                    "locationAlwaysAndWhenInUsePermission": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel."
+                    "locationAlwaysAndWhenInUsePermission": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
+                    "locationWhenInUsePermission": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
+                    "locationAlwaysPermission": "Allon Mobile Pro a besoin d'accéder à votre position en arrière-plan pour continuer le suivi même quand l'app est en arrière-plan.",
+                    "isAndroidBackgroundLocationEnabled": true,
+                    "isIosBackgroundLocationEnabled": true
                 }
             ],
             [
