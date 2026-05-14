@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
-import { socketService } from '@/services/socket.service';
 import { locationTrackingService } from '@/services/location-tracking.service';
+import { socketService } from '@/services/socket.service';
 import * as Location from 'expo-location';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 
 interface BusPosition {
   busId: string;

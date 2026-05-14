@@ -78,6 +78,17 @@ export interface Departure {
         }
 
     }];
+    bus?:{
+        id?: string;
+        busType?: string;
+        licencePlate?: string;
+        mark?: string;
+        model?: string;
+        capacity?: number;
+        originalColor?: string;
+        rows?: number;
+        seatLayout?: number[]; // [2, 3]
+    }
 }
 
 /**

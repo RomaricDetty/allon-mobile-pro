@@ -154,6 +154,7 @@ export interface ApiDeparture {
         stationTo: { name: string };
     };
     bus: {
+        id: string;
         busType: string;
         licencePlate: string;
         mark: string;
@@ -339,6 +340,7 @@ export const transformApiDepartureToDeparture = (apiDeparture: ApiDeparture): an
     return {
         id: apiDeparture.id,
         company: apiDeparture.company.name,
+        bus: apiDeparture.bus,
         busType: `${apiDeparture.bus.busType} ${apiDeparture.bus.mark}`,
         departureStationCode: departureStationCode,
         departureStationName: apiDeparture.trip.stationFrom.name,

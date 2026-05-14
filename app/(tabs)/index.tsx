@@ -5,12 +5,12 @@ import { CustomDatePicker, FilterModal, HomeHeader, type DateFilterType } from '
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useDimensions } from '@/hooks/use-dimensions';
+import { socketService } from '@/services';
 import { styles } from '@/styles/homeScreen';
 import { formatDateForApi, getDateRange } from '@/utils/date';
 import { departureEventEmitter } from '@/utils/departure-events';
 import { transformApiDepartureToDeparture, type ApiDeparture } from '@/utils/departure-utils';
 import { logError } from '@/utils/logger';
-import { socketService } from '@/services';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -237,7 +237,7 @@ export default function HomeScreen() {
             const data: PaginatedResponse = response.data;
 
             console.log('data received ==>', data);
-            console.log('data.items ===> ', data.items[0]?.trip);
+            console.log('data.items ===> ', data.items[0].bus);
 
             if (data?.items && Array.isArray(data.items)) {
                 const transformedDepartures = data.items.map(transformApiDepartureToDeparture) as Departure[];
@@ -509,6 +509,7 @@ export default function HomeScreen() {
      */
     const renderItem = useCallback(
         ({ item }: { item: Departure }) => (
+            console.log('item departure render card ===> ', item),
             <DepartureCard
                 departure={item}
                 onTicketPress={() => handleTicketPress(item.id)}

@@ -9,9 +9,9 @@ import { useTrackRouteLocation } from "@/hooks/use-track-route-location";
 import { useTrackRouteMapMapbox } from "@/hooks/use-track-route-map-mapbox";
 import { locationTrackingService, socketService } from "@/services";
 import { styles } from "@/styles/track-route";
-import { performPreTrackingChecks, showPermissionGuide } from "@/utils/permission-helper";
-import { logError } from "@/utils/logger";
 import { bearingAlongPolylineNearPoint, calculateDistance, prependPointIfFarFromPolylineStart } from "@/utils/location";
+import { logError } from "@/utils/logger";
+import { performPreTrackingChecks, showPermissionGuide } from "@/utils/permission-helper";
 import { getRouteCoordinates, getTripEndpointCoords, resolveTripForRouting } from "@/utils/route-calculator";
 import { Camera, LineLayer, MapView, MarkerView, setAccessToken, ShapeSource } from "@rnmapbox/maps";
 import * as Location from "expo-location";
@@ -137,6 +137,7 @@ export default function TrackRouteMapboxScreen() {
                 departureId: departure.departure?.id,
                 departureStatus: departure.departure?.status,
                 trackingInitialized: trackingInitializedRef.current,
+                busId: departure.departure?.bus?.id,
             });
 
             // Vérifier si le tracking est déjà actif (retour sur l'écran)
@@ -160,7 +161,7 @@ export default function TrackRouteMapboxScreen() {
 
             console.log('[TrackRoute] Conditions remplies: isRouteStarted=true, démarrage du tracking...');
             
-            const busId = departure.departure.id;
+            const busId =  departure.departure?.bus?.id ?? null;
             
             if (!busId) {
                 console.error('[TrackRoute] Bus ID manquant');
@@ -400,7 +401,10 @@ export default function TrackRouteMapboxScreen() {
         setRouteLoading(true);
         setRouteCoordinates(null);
 
-        getRouteCoordinates(routingTrip, routeFetchOrigin, toCoord, { skipPrecalculatedRoute: true })
+        getRouteCoordinates(routingTrip, routeFetchOrigin, toCoord, {
+            skipPrecalculatedRoute: true,
+            stationDepartCoord: fromCoord ?? undefined,
+        })
             .then((coordinates) => {
                 if (!cancelled) {
                     setRouteCoordinates(coordinates);
@@ -424,6 +428,8 @@ export default function TrackRouteMapboxScreen() {
     }, [
         routeFetchOrigin?.[0],
         routeFetchOrigin?.[1],
+        fromCoord?.[0],
+        fromCoord?.[1],
         toCoord?.[0],
         toCoord?.[1],
         routingTrip,
@@ -476,6 +482,14 @@ export default function TrackRouteMapboxScreen() {
             }
             const lngs = routeLineForMap.map((c) => c[0]);
             const lats = routeLineForMap.map((c) => c[1]);
+            if (fromCoord) {
+                lngs.push(fromCoord[0]);
+                lats.push(fromCoord[1]);
+            }
+            if (toCoord) {
+                lngs.push(toCoord[0]);
+                lats.push(toCoord[1]);
+            }
             const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
             const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
             if (ne[0] === sw[0] && ne[1] === sw[1]) {
@@ -497,7 +511,7 @@ export default function TrackRouteMapboxScreen() {
             cancelled = true;
             clearTimeout(t);
         };
-    }, [routeLineForMap, map.cameraRef]);
+    }, [routeLineForMap, fromCoord, toCoord, map.cameraRef]);
 
     const centerCoord = map.toMapboxPosition(location.latitude, location.longitude);
 
@@ -618,8 +632,8 @@ export default function TrackRouteMapboxScreen() {
                             <LineLayer id="route-line" style={routeLineStyle} />
                         </ShapeSource>
                     )}
-                    {routeFetchOrigin && (
-                        <MarkerView coordinate={routeFetchOrigin} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+                    {fromCoord && (
+                        <MarkerView coordinate={fromCoord} anchor={{ x: 0.5, y: 1 }} allowOverlap>
                             <Image source={require("@/assets/images/flag-start.png")} style={routeMarkerStyles.flag} resizeMode="contain" />
                         </MarkerView>
                     )}
