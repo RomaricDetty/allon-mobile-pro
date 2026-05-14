@@ -1,7 +1,7 @@
 {
     "expo": {
         "name": "AllOn Pro",
-        "slug": "allon-mobile-pro",
+        "slug": "mobile.app.allonpro",
         "version": "1.0.0",
         "orientation": "portrait",
         "icon": "./assets/images/icon.png",
@@ -13,12 +13,12 @@
         "assetBundlePatterns": [
             "**/*"
         ],
-        "scheme": "allonmobilepro",
+        "scheme": "mobile.app.allonpro",
         "userInterfaceStyle": "automatic",
         "newArchEnabled": true,
         "ios": {
             "supportsTablet": true,
-            "bundleIdentifier": "com.allonmobilepro",
+            "bundleIdentifier": "mobile.app.allonpro",
             "infoPlist": {
                 "UIViewControllerBasedStatusBarAppearance": false,
                 "UILaunchStoryboardName": "SplashScreen",
@@ -48,7 +48,7 @@
                 "android.permission.ACCESS_NETWORK_STATE",
                 "android.permission.WAKE_LOCK"
             ],
-            "package": "com.allonmobilepro"
+            "package": "mobile.app.allonpro"
         },
         "web": {
             "output": "static",
@@ -58,15 +58,15 @@
             [
                 "expo-camera",
                 {
-                    "cameraPermission": "Permettre à Allon Mobile Pro d'accéder à votre caméra pour scanner les QR codes."
+                    "cameraPermission": "Permettre à AllOn Pro d'accéder à votre caméra pour scanner les QR codes."
                 }
             ],
             [
                 "expo-location",
                 {
-                    "locationAlwaysAndWhenInUsePermission": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
-                    "locationWhenInUsePermission": "Allon Mobile Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
-                    "locationAlwaysPermission": "Allon Mobile Pro a besoin d'accéder à votre position en arrière-plan pour continuer le suivi même quand l'app est en arrière-plan.",
+                    "locationAlwaysAndWhenInUsePermission": "AllOn Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
+                    "locationWhenInUsePermission": "AllOn Pro a besoin d'accéder à votre position pour suivre votre trajet en temps réel.",
+                    "locationAlwaysPermission": "AllOn Pro a besoin d'accéder à votre position en arrière-plan pour continuer le suivi même quand l'app est en arrière-plan.",
                     "isAndroidBackgroundLocationEnabled": true,
                     "isIosBackgroundLocationEnabled": true
                 }
