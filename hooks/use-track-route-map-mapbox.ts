@@ -35,7 +35,6 @@ export function useTrackRouteMapMapbox(
             try {
                 cameraRef.current.setCamera({
                     centerCoordinate: toMapboxPosition(lat, lng),
-                    zoomLevel,
                     heading: heading ?? 0,
                     animationDuration: 500,
                 });
@@ -43,7 +42,7 @@ export function useTrackRouteMapMapbox(
                 logError("[MAPBOX]", e);
             }
         },
-        [zoomLevel, isValidCoordinates]
+        [isValidCoordinates]
     );
 
     const centerMap = useCallback(() => {

@@ -10,6 +10,8 @@ import { useTrackRouteMapMapbox } from "@/hooks/use-track-route-map-mapbox";
 import { locationTrackingService, socketService } from "@/services";
 import { styles } from "@/styles/track-route";
 import { performPreTrackingChecks, showPermissionGuide } from "@/utils/permission-helper";
+import { logError } from "@/utils/logger";
+import { getRouteCoordinates, getTripEndpointCoords, resolveTripForRouting } from "@/utils/route-calculator";
 import { Camera, LineLayer, MapView, MarkerView, setAccessToken, ShapeSource } from "@rnmapbox/maps";
 import * as Location from "expo-location";
 import { router } from "expo-router";
@@ -17,7 +19,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Image, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getMapboxAccessToken } from "./constants";
-import { getRouteCoordinates } from "@/utils/route-calculator";
 
 /** Écran de suivi de trajet avec Mapbox – position du conducteur en temps réel */
 export default function TrackRouteMapboxScreen() {
@@ -43,6 +44,10 @@ export default function TrackRouteMapboxScreen() {
     const [routeLoading, setRouteLoading] = useState(false);
     const [socketConnected, setSocketConnected] = useState(false);
     const trackingInitializedRef = useRef(false);
+    /** Évite de rappeler fitBounds à chaque rendu une fois l’itinéraire cadré. */
+    const didFitRouteBoundsRef = useRef(false);
+    /** Permet un second cadrage quand l’API Directions remplace une ligne provisoire (2 pts) par le tracé complet. */
+    const lastFittedPointCountRef = useRef(0);
 
     useEffect(() => {
         try {
@@ -323,45 +328,29 @@ export default function TrackRouteMapboxScreen() {
         if (!departure.departure) router.back();
     }, [departure.departure]);
 
-    /** Récupère l'itinéraire depuis l'objet trip ou calcule via Mapbox Directions */
-    const trip = departure.departure?.trip;
-    
-    // Logger la structure complète du trip pour voir si un itinéraire existe
     useEffect(() => {
-        if (trip) {
-            console.log('[TrackRoute] Structure du trip:', JSON.stringify(trip, null, 2));
-        }
-    }, [trip]);
-    
-    const fromCoord = useMemo((): [number, number] | null => {
-        const from = trip?.stationFrom?.coordinate;
-        if (!from) return null;
-        const lat = typeof from.latitude === "number" ? from.latitude : Number(from.latitude);
-        const lng = typeof from.longitude === "number" ? from.longitude : Number(from.longitude);
-        if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
-        return [lng, lat];
-    }, [trip?.stationFrom?.coordinate]);
-    
-    const toCoord = useMemo((): [number, number] | null => {
-        const to = trip?.stationTo?.coordinate;
-        if (!to) return null;
-        const lat = typeof to.latitude === "number" ? to.latitude : Number(to.latitude);
-        const lng = typeof to.longitude === "number" ? to.longitude : Number(to.longitude);
-        if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
-        return [lng, lat];
-    }, [trip?.stationTo?.coordinate]);
+        didFitRouteBoundsRef.current = false;
+        lastFittedPointCountRef.current = 0;
+    }, [departure.departure?.id]);
+
+    /** Trip utilisé pour le tracé (priorité au segment primaire dans `trips`). */
+    const routingTrip = useMemo(() => resolveTripForRouting(departure.departure), [departure.departure]);
+
+    const endpointCoords = useMemo(() => getTripEndpointCoords(routingTrip), [routingTrip]);
+    const fromCoord = endpointCoords?.fromCoord ?? null;
+    const toCoord = endpointCoords?.toCoord ?? null;
 
     useEffect(() => {
         if (!fromCoord || !toCoord) {
             setRouteCoordinates(null);
             return;
         }
-        
+
         let cancelled = false;
         setRouteLoading(true);
         setRouteCoordinates(null);
-        
-        getRouteCoordinates(trip, fromCoord, toCoord)
+
+        getRouteCoordinates(routingTrip, fromCoord, toCoord)
             .then((coordinates) => {
                 if (!cancelled) {
                     setRouteCoordinates(coordinates);
@@ -369,7 +358,7 @@ export default function TrackRouteMapboxScreen() {
             })
             .catch((error) => {
                 if (!cancelled) {
-                    console.error('[TrackRoute] Erreur lors du calcul de l\'itinéraire:', error);
+                    logError("[TrackRoute] Erreur calcul itinéraire:", error);
                     setRouteCoordinates([fromCoord, toCoord]);
                 }
             })
@@ -378,11 +367,90 @@ export default function TrackRouteMapboxScreen() {
                     setRouteLoading(false);
                 }
             });
-        
-        return () => { cancelled = true; };
-    }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1], trip]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1], routingTrip]);
+
+    /**
+     * Cadre la caméra sur l’itinéraire une fois les points chargés (carte prête ou peu après).
+     */
+    useEffect(() => {
+        if (!routeCoordinates || routeCoordinates.length < 2) return;
+        const n = routeCoordinates.length;
+        if (didFitRouteBoundsRef.current && n <= lastFittedPointCountRef.current) return;
+
+        let cancelled = false;
+        let attempts = 0;
+
+        const runFit = () => {
+            if (cancelled) return;
+            const cam = map.cameraRef.current;
+            if (!cam) {
+                if (attempts++ < 15) {
+                    setTimeout(runFit, 200);
+                }
+                return;
+            }
+            const lngs = routeCoordinates.map((c) => c[0]);
+            const lats = routeCoordinates.map((c) => c[1]);
+            const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
+            const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
+            if (ne[0] === sw[0] && ne[1] === sw[1]) {
+                didFitRouteBoundsRef.current = true;
+                lastFittedPointCountRef.current = n;
+                return;
+            }
+            try {
+                cam.fitBounds(ne, sw, [100, 96, 120, 96], 1000);
+                didFitRouteBoundsRef.current = true;
+                lastFittedPointCountRef.current = n;
+            } catch (e) {
+                logError("[TrackRoute] fitBounds itinéraire:", e);
+            }
+        };
+
+        const t = setTimeout(runFit, 150);
+        return () => {
+            cancelled = true;
+            clearTimeout(t);
+        };
+    }, [routeCoordinates, map.cameraRef]);
 
     const centerCoord = map.toMapboxPosition(location.latitude, location.longitude);
+
+    /** Tant que la polyline n’est pas prête, on garde un défaut caméra ; après chargement, fitBounds seul cadre l’itinéraire. */
+    const routeReadyForCamera =
+        routeCoordinates != null && routeCoordinates.length >= 2;
+
+    const cameraDefaultSettings = useMemo(() => {
+        if (routeReadyForCamera) return undefined;
+        return {
+            centerCoordinate: map.toMapboxPosition(location.latitude, location.longitude),
+            zoomLevel: 12,
+            heading: location.heading ?? 0,
+        };
+    }, [routeReadyForCamera, location.latitude, location.longitude, location.heading, map.toMapboxPosition]);
+
+    /**
+     * Au chargement de la carte : ne pas forcer un zoom 15 sur le conducteur si un itinéraire va être cadré (écrase fitBounds).
+     */
+    const handleMapLoaded = useCallback(() => {
+        if (fromCoord && toCoord) return;
+        map.onMapLoaded();
+    }, [fromCoord, toCoord, map.onMapLoaded]);
+
+    const routeLineStyle = useMemo(
+        () => ({
+            lineColor: isDark ? "#6BB3F0" : "#1776BA",
+            lineWidth: 5,
+            lineCap: "round" as const,
+            lineJoin: "round" as const,
+            lineOpacity: 0.92,
+        }),
+        [isDark]
+    );
 
     /** Ne contrôle la caméra par props qu’en mode suivi pour permettre le pan sinon */
     const routeShape = useMemo(() => {
@@ -448,7 +516,7 @@ export default function TrackRouteMapboxScreen() {
                 <MapView
                     style={styles.map}
                     styleURL={undefined}
-                    onDidFinishLoadingMap={map.onMapLoaded}
+                    onDidFinishLoadingMap={handleMapLoaded}
                     onCameraChanged={map.onCameraChanged}
                     rotateEnabled
                     pitchEnabled={false}
@@ -458,24 +526,15 @@ export default function TrackRouteMapboxScreen() {
                     <Camera
                         ref={map.cameraRef}
                         centerCoordinate={cameraCenter}
-                        zoomLevel={map.zoomLevel}
-                        defaultSettings={{
-                            centerCoordinate: centerCoord,
-                            zoomLevel: 15,
-                            heading: location.heading ?? 0,
-                        }}
+                        defaultSettings={cameraDefaultSettings}
                     />
                     {routeShape && (
-                        <ShapeSource id="route-source" shape={routeShape}>
-                            <LineLayer
-                                id="route-line"
-                                style={{
-                                    lineColor: "#1776BA",
-                                    lineWidth: 4,
-                                    lineCap: "round",
-                                    lineJoin: "round",
-                                }}
-                            />
+                        <ShapeSource
+                            id="route-source"
+                            key={`route-${departure.departure?.id ?? "dep"}-${routeCoordinates?.length ?? 0}`}
+                            shape={routeShape}
+                        >
+                            <LineLayer id="route-line" style={routeLineStyle} />
                         </ShapeSource>
                     )}
                     {fromCoord && (

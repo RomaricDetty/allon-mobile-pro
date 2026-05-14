@@ -10,6 +10,7 @@ import { formatDateForApi, getDateRange } from '@/utils/date';
 import { departureEventEmitter } from '@/utils/departure-events';
 import { transformApiDepartureToDeparture, type ApiDeparture } from '@/utils/departure-utils';
 import { logError } from '@/utils/logger';
+import { socketService } from '@/services';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -131,6 +132,12 @@ export default function HomeScreen() {
                             AsyncStorage.setItem('expires_at', String(expiresAtTimestamp)),
                             AsyncStorage.setItem('token_type', response.data.token_type),
                         ]);
+
+                        try {
+                            await socketService.refreshAuthSocketConnection();
+                        } catch (socketErr) {
+                            logError('[Home] Reconnexion socket après refresh token:', socketErr);
+                        }
 
                         return true;
                     }

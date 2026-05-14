@@ -55,7 +55,9 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
   });
 
   const appState = useRef(AppState.currentState);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Ref pour éviter les closures obsolètes (reconnexion, AppState, événements socket). */
+  const isTrackingRef = useRef(false);
 
   /**
    * Initialiser la connexion Socket.IO
@@ -104,6 +106,7 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
       });
 
       if (success) {
+        isTrackingRef.current = true;
         setState(prev => ({ 
           ...prev, 
           isTracking: true, 
@@ -135,6 +138,7 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
   const stopTracking = useCallback(async () => {
     try {
       await locationTrackingService.stopTracking();
+      isTrackingRef.current = false;
       setState(prev => ({ 
         ...prev, 
         isTracking: false,
@@ -178,7 +182,7 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
         console.log('[useBusTracking] App au premier plan');
         
         // Vérifier la connexion socket et reconnecter si nécessaire
-        if (state.isTracking && !socketService.connected) {
+        if (isTrackingRef.current && !socketService.connected) {
           console.log('[useBusTracking] Reconnexion socket...');
           initializeSocket();
         }
@@ -190,7 +194,7 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
     return () => {
       subscription.remove();
     };
-  }, [state.isTracking, initializeSocket]);
+  }, [initializeSocket]);
 
   /**
    * Gérer les événements de connexion socket
@@ -201,7 +205,7 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
       
       // Tenter une reconnexion après 3 secondes
       reconnectTimeoutRef.current = setTimeout(() => {
-        if (state.isTracking) {
+        if (isTrackingRef.current) {
           console.log('[useBusTracking] Tentative de reconnexion...');
           initializeSocket();
         }
@@ -212,7 +216,7 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
       setState(prev => ({ ...prev, isConnected: true, error: null }));
       
       // Rejoindre la room si le tracking est actif
-      if (state.isTracking) {
+      if (isTrackingRef.current) {
         socketService.joinBusRoom(busId);
       }
     });
@@ -222,9 +226,10 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
       unsubscribeConnectionSuccess();
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
     };
-  }, [busId, state.isTracking, initializeSocket]);
+  }, [busId, initializeSocket]);
 
   /**
    * Auto-connexion au montage du composant
@@ -236,12 +241,12 @@ export function useBusTracking(busId: string, options: TrackingOptions = {}) {
     }
 
     return () => {
-      // Nettoyage lors du démontage
-      if (state.isTracking) {
-        stopTracking();
+      if (isTrackingRef.current) {
+        void locationTrackingService.stopTracking();
+        isTrackingRef.current = false;
       }
     };
-  }, []);
+  }, [options.autoConnect, initializeSocket, checkPermissions]);
 
   return {
     // État

@@ -217,7 +217,7 @@ export const TRACKING_PRESETS = {
 Le service inclut automatiquement le token d'authentification dans les connexions Socket.IO :
 
 ```typescript
-const token = await AsyncStorage.getItem('userToken');
+const token = await AsyncStorage.getItem('token');
 
 this.socket = io(socketUrl, {
   auth: {

@@ -187,8 +187,10 @@ class LocationTrackingService {
 
         const timeElapsed = location.timestamp - this.lastSentPosition.timestamp;
 
-        console.log('[LocationTracking] Distance depuis dernière position:', distance.toFixed(2) + 'm (seuil: ' + this.minDistanceThreshold + 'm)');
-        console.log('[LocationTracking] Temps écoulé depuis dernier envoi:', (timeElapsed / 1000).toFixed(1) + 's (seuil: ' + (this.minTimeThreshold / 1000) + 's)');
+        if (__DEV__) {
+            console.log('[LocationTracking] Distance depuis dernière position:', distance.toFixed(2) + 'm (seuil: ' + this.minDistanceThreshold + 'm)');
+            console.log('[LocationTracking] Temps écoulé depuis dernier envoi:', (timeElapsed / 1000).toFixed(1) + 's (seuil: ' + (this.minTimeThreshold / 1000) + 's)');
+        }
 
         if (distance >= this.minDistanceThreshold) {
             return { send: true, reason: `Déplacement de ${distance.toFixed(2)}m` };
@@ -207,21 +209,27 @@ class LocationTrackingService {
     private handleLocationUpdate(location: Location.LocationObject, busId: string): void {
         const { latitude, longitude, speed, heading, accuracy } = location.coords;
 
-        console.log('[LocationTracking] Position GPS reçue:', {
-            lat: latitude.toFixed(6),
-            lng: longitude.toFixed(6),
-            speed: speed ? (speed * 3.6).toFixed(1) + ' km/h' : '0.0 km/h',
-            accuracy: accuracy ? accuracy.toFixed(1) + 'm' : 'N/A',
-        });
+        if (__DEV__) {
+            console.log('[LocationTracking] Position GPS reçue:', {
+                lat: latitude.toFixed(6),
+                lng: longitude.toFixed(6),
+                speed: speed ? (speed * 3.6).toFixed(1) + ' km/h' : '0.0 km/h',
+                accuracy: accuracy ? accuracy.toFixed(1) + 'm' : 'N/A',
+            });
+        }
 
         const { send, reason } = this.shouldSendPosition(location);
 
         if (!send) {
-            console.log('[LocationTracking] Position ignorée (déplacement < ' + this.minDistanceThreshold + 'm ET temps < ' + (this.minTimeThreshold / 1000) + 's)');
+            if (__DEV__) {
+                console.log('[LocationTracking] Position ignorée (déplacement < ' + this.minDistanceThreshold + 'm ET temps < ' + (this.minTimeThreshold / 1000) + 's)');
+            }
             return;
         }
 
-        console.log('[LocationTracking] Envoi de la position - Raison:', reason);
+        if (__DEV__) {
+            console.log('[LocationTracking] Envoi de la position - Raison:', reason);
+        }
 
         const positionData = {
             busId,
@@ -241,12 +249,14 @@ class LocationTrackingService {
             timestamp: location.timestamp,
         };
 
-        console.log('[LocationTracking] Position envoyée au Socket.IO:', {
-            busId,
-            coordinates: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-            speed: speed ? (speed * 3.6).toFixed(1) + ' km/h' : '0.0 km/h',
-            timestamp: new Date(location.timestamp).toLocaleTimeString('fr-FR'),
-        });
+        if (__DEV__) {
+            console.log('[LocationTracking] Position envoyée au Socket.IO:', {
+                busId,
+                coordinates: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+                speed: speed ? (speed * 3.6).toFixed(1) + ' km/h' : '0.0 km/h',
+                timestamp: new Date(location.timestamp).toLocaleTimeString('fr-FR'),
+            });
+        }
     }
 
     /**
