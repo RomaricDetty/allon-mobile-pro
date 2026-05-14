@@ -34,8 +34,46 @@ class LocationTrackingService {
     private isTracking: boolean = false;
     private currentBusId: string | null = null;
     private lastSentPosition: { lat: number; lng: number; timestamp: number } | null = null;
+    /** Horloge murale (ms) du dernier envoi réussi — évite les timestamps fixes ou désordonnés du GPS pour l’intervalle temps. */
+    private lastSentWallClockMs: number = 0;
     private minDistanceThreshold: number = DEFAULT_MIN_DISTANCE_THRESHOLD;
     private minTimeThreshold: number = DEFAULT_MIN_TIME_THRESHOLD;
+    /** Interrogation GPS ponctuelle en complément du watch (le fused ne rappelle pas toujours à l’arrêt). */
+    private gpsPollTimer: ReturnType<typeof setInterval> | null = null;
+
+    /**
+     * Convertit le timestamp renvoyé par expo-location en epoch millisecondes (certaines piles renvoient des valeurs ambiguës).
+     */
+    private normalizeLocationEpochMs(loc: Location.LocationObject): number {
+        const t = loc.timestamp;
+        if (t == null || !Number.isFinite(t)) return Date.now();
+        const n = Number(t);
+        return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
+    }
+
+    /**
+     * Arrête le timer d’interrogation GPS périodique.
+     */
+    private clearGpsPoll(): void {
+        if (this.gpsPollTimer) {
+            clearInterval(this.gpsPollTimer);
+            this.gpsPollTimer = null;
+        }
+    }
+
+    /**
+     * Relit la position réelle via le SDK à intervalle fixe (aligné sur timeInterval) pour déclencher handleLocationUpdate même sans mouvement.
+     */
+    private startPeriodicGpsPoll(busId: string, intervalMs: number): void {
+        this.clearGpsPoll();
+        this.gpsPollTimer = setInterval(() => {
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+                .then((loc) => this.handleLocationUpdate(loc, busId))
+                .catch((err) => {
+                    if (__DEV__) console.warn('[LocationTracking] Poll GPS ignoré:', err);
+                });
+        }, intervalMs);
+    }
 
     /**
      * Demander les permissions de localisation (foreground + background)
@@ -135,6 +173,7 @@ class LocationTrackingService {
             const accuracy = config.accuracy || DEFAULT_ACCURACY;
             const distanceInterval = config.distanceInterval || DEFAULT_DISTANCE_INTERVAL;
             const timeInterval = config.timeInterval || DEFAULT_TIME_INTERVAL;
+            this.minTimeThreshold = Math.max(1000, timeInterval);
 
             console.log('[LocationTracking] Démarrage du suivi GPS avec config:', {
                 busId: config.busId,
@@ -162,6 +201,8 @@ class LocationTrackingService {
             );
 
             this.isTracking = true;
+            const pollMs = Math.max(1000, timeInterval);
+            this.startPeriodicGpsPoll(config.busId, pollMs);
             console.log('[LocationTracking] Tracking démarré avec succès pour le bus:', config.busId);
             return true;
         } catch (error) {
@@ -185,19 +226,19 @@ class LocationTrackingService {
             location.coords.longitude
         );
 
-        const timeElapsed = location.timestamp - this.lastSentPosition.timestamp;
+        const timeSinceLastSendMs = Date.now() - this.lastSentWallClockMs;
 
         if (__DEV__) {
             console.log('[LocationTracking] Distance depuis dernière position:', distance.toFixed(2) + 'm (seuil: ' + this.minDistanceThreshold + 'm)');
-            console.log('[LocationTracking] Temps écoulé depuis dernier envoi:', (timeElapsed / 1000).toFixed(1) + 's (seuil: ' + (this.minTimeThreshold / 1000) + 's)');
+            console.log('[LocationTracking] Temps écoulé depuis dernier envoi:', (timeSinceLastSendMs / 1000).toFixed(1) + 's (seuil: ' + (this.minTimeThreshold / 1000) + 's)');
         }
 
         if (distance >= this.minDistanceThreshold) {
             return { send: true, reason: `Déplacement de ${distance.toFixed(2)}m` };
         }
 
-        if (timeElapsed >= this.minTimeThreshold) {
-            return { send: true, reason: `Intervalle de temps (${(timeElapsed / 1000).toFixed(1)}s, distance: ${distance.toFixed(2)}m)` };
+        if (timeSinceLastSendMs >= this.minTimeThreshold) {
+            return { send: true, reason: `Intervalle de temps (${(timeSinceLastSendMs / 1000).toFixed(1)}s, distance: ${distance.toFixed(2)}m)` };
         }
 
         return { send: false, reason: 'Seuils non atteints' };
@@ -231,6 +272,7 @@ class LocationTrackingService {
             console.log('[LocationTracking] Envoi de la position - Raison:', reason);
         }
 
+        const epochMs = this.normalizeLocationEpochMs(location);
         const positionData = {
             busId,
             lat: latitude,
@@ -238,15 +280,16 @@ class LocationTrackingService {
             speed: speed || 0,
             heading: heading || 0,
             accuracy: accuracy || 0,
-            timestamp: location.timestamp,
+            timestamp: epochMs,
         };
 
         socketService.sendPosition(positionData);
 
+        this.lastSentWallClockMs = Date.now();
         this.lastSentPosition = {
             lat: latitude,
             lng: longitude,
-            timestamp: location.timestamp,
+            timestamp: epochMs,
         };
 
         if (__DEV__) {
@@ -254,7 +297,7 @@ class LocationTrackingService {
                 busId,
                 coordinates: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
                 speed: speed ? (speed * 3.6).toFixed(1) + ' km/h' : '0.0 km/h',
-                timestamp: new Date(location.timestamp).toLocaleTimeString('fr-FR'),
+                timestamp: new Date(epochMs).toLocaleTimeString('fr-FR'),
             });
         }
     }
@@ -288,6 +331,7 @@ class LocationTrackingService {
         }
 
         try {
+            this.clearGpsPoll();
             if (this.subscription) {
                 this.subscription.remove();
                 this.subscription = null;
@@ -300,6 +344,7 @@ class LocationTrackingService {
             this.isTracking = false;
             this.currentBusId = null;
             this.lastSentPosition = null;
+            this.lastSentWallClockMs = 0;
 
             console.log('[LocationTracking] Tracking arrêté');
         } catch (error) {

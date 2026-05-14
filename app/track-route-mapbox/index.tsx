@@ -11,6 +11,7 @@ import { locationTrackingService, socketService } from "@/services";
 import { styles } from "@/styles/track-route";
 import { performPreTrackingChecks, showPermissionGuide } from "@/utils/permission-helper";
 import { logError } from "@/utils/logger";
+import { bearingAlongPolylineNearPoint, calculateDistance, prependPointIfFarFromPolylineStart } from "@/utils/location";
 import { getRouteCoordinates, getTripEndpointCoords, resolveTripForRouting } from "@/utils/route-calculator";
 import { Camera, LineLayer, MapView, MarkerView, setAccessToken, ShapeSource } from "@rnmapbox/maps";
 import * as Location from "expo-location";
@@ -19,6 +20,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Image, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getMapboxAccessToken } from "./constants";
+
+/** Écart max. (m) entre le bus et le 1er point de la ligne : on préfixe la position GPS pour l’affichage. */
+const ROUTE_POLYLINE_JOIN_GAP_M = 40;
+/** Déplacement minimum (m) depuis l’origine du dernier tracé pour relancer Mapbox Directions. */
+const ROUTE_ORIGIN_RECALC_METERS = 75;
+/** Si l’origine était la station, recalcul dès que le bus est à ce délà (m) du point station. */
+const ROUTE_LEAVE_STATION_METERS = 40;
 
 /** Écran de suivi de trajet avec Mapbox – position du conducteur en temps réel */
 export default function TrackRouteMapboxScreen() {
@@ -48,6 +56,8 @@ export default function TrackRouteMapboxScreen() {
     const didFitRouteBoundsRef = useRef(false);
     /** Permet un second cadrage quand l’API Directions remplace une ligne provisoire (2 pts) par le tracé complet. */
     const lastFittedPointCountRef = useRef(0);
+    /** Origine utilisée pour le dernier appel Directions (station ou GPS), mise à jour quand le bus s’éloigne assez. */
+    const [routeFetchOrigin, setRouteFetchOrigin] = useState<[number, number] | null>(null);
 
     useEffect(() => {
         try {
@@ -310,11 +320,6 @@ export default function TrackRouteMapboxScreen() {
     }, [stopTracking]);
 
     useEffect(() => {
-        if (departure.isRouteStarted && location)
-            map.updateCameraPosition(location.latitude, location.longitude, location.heading);
-    }, [departure.isRouteStarted, location.latitude, location.longitude, location.heading, map.updateCameraPosition]);
-
-    useEffect(() => {
         if (!isLoading && location.latitude !== defaultLocation.latitude)
             setTimeout(() => map.getCurrentLocation(), 100);
     }, [isLoading, location.latitude, defaultLocation.latitude, map.getCurrentLocation]);
@@ -331,6 +336,7 @@ export default function TrackRouteMapboxScreen() {
     useEffect(() => {
         didFitRouteBoundsRef.current = false;
         lastFittedPointCountRef.current = 0;
+        setRouteFetchOrigin(null);
     }, [departure.departure?.id]);
 
     /** Trip utilisé pour le tracé (priorité au segment primaire dans `trips`). */
@@ -340,8 +346,52 @@ export default function TrackRouteMapboxScreen() {
     const fromCoord = endpointCoords?.fromCoord ?? null;
     const toCoord = endpointCoords?.toCoord ?? null;
 
+    /** GPS utilisable pour l’itinéraire (sans exiger d’être différent du point par défaut carte — évite l’itinéraire serveur figé sur simulateur). */
+    const canUseGpsForRoute = useMemo(
+        () => !isLoading && isValidCoords(location.latitude, location.longitude),
+        [isLoading, isValidCoords, location.latitude, location.longitude]
+    );
+
+    /**
+     * Met à jour l’origine du tracé : station si pas de GPS, sinon position actuelle du bus ; relance un recalcul si le bus s’est déplacé de ROUTE_ORIGIN_RECALC_METERS par rapport à l’origine du dernier tracé.
+     */
     useEffect(() => {
-        if (!fromCoord || !toCoord) {
+        if (!fromCoord || !toCoord) return;
+
+        if (!canUseGpsForRoute) {
+            setRouteFetchOrigin(fromCoord);
+            return;
+        }
+
+        const cur: [number, number] = [location.longitude, location.latitude];
+        setRouteFetchOrigin((prev) => {
+            if (!prev) return cur;
+            const samePoint = (a: [number, number], b: [number, number]) =>
+                Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+            if (samePoint(prev, fromCoord)) {
+                const dStation = calculateDistance(fromCoord[1], fromCoord[0], cur[1], cur[0]);
+                if (dStation >= ROUTE_LEAVE_STATION_METERS) return cur;
+            }
+            const d = calculateDistance(prev[1], prev[0], cur[1], cur[0]);
+            if (d >= ROUTE_ORIGIN_RECALC_METERS) return cur;
+            return prev;
+        });
+    }, [fromCoord, toCoord, canUseGpsForRoute, location.latitude, location.longitude]);
+
+    /** Ligne affichée : toujours raccordée au bus si le 1er point Mapbox est trop loin. */
+    const routeLineForMap = useMemo(() => {
+        if (!routeCoordinates?.length) return null;
+        if (!canUseGpsForRoute) return routeCoordinates;
+        return prependPointIfFarFromPolylineStart(
+            routeCoordinates,
+            location.latitude,
+            location.longitude,
+            ROUTE_POLYLINE_JOIN_GAP_M
+        );
+    }, [routeCoordinates, canUseGpsForRoute, location.latitude, location.longitude]);
+
+    useEffect(() => {
+        if (!routeFetchOrigin || !toCoord) {
             setRouteCoordinates(null);
             return;
         }
@@ -350,7 +400,7 @@ export default function TrackRouteMapboxScreen() {
         setRouteLoading(true);
         setRouteCoordinates(null);
 
-        getRouteCoordinates(routingTrip, fromCoord, toCoord)
+        getRouteCoordinates(routingTrip, routeFetchOrigin, toCoord, { skipPrecalculatedRoute: true })
             .then((coordinates) => {
                 if (!cancelled) {
                     setRouteCoordinates(coordinates);
@@ -359,7 +409,7 @@ export default function TrackRouteMapboxScreen() {
             .catch((error) => {
                 if (!cancelled) {
                     logError("[TrackRoute] Erreur calcul itinéraire:", error);
-                    setRouteCoordinates([fromCoord, toCoord]);
+                    setRouteCoordinates([routeFetchOrigin, toCoord]);
                 }
             })
             .finally(() => {
@@ -371,14 +421,45 @@ export default function TrackRouteMapboxScreen() {
         return () => {
             cancelled = true;
         };
-    }, [fromCoord?.[0], fromCoord?.[1], toCoord?.[0], toCoord?.[1], routingTrip]);
+    }, [
+        routeFetchOrigin?.[0],
+        routeFetchOrigin?.[1],
+        toCoord?.[0],
+        toCoord?.[1],
+        routingTrip,
+    ]);
+
+    /** Cap affiché : priorité au tangent de l’itinéraire (aligné route), sinon cap GPS si valide. */
+    const displayHeading = useMemo(() => {
+        if (
+            routeLineForMap &&
+            routeLineForMap.length >= 2 &&
+            isValidCoords(location.latitude, location.longitude)
+        ) {
+            const along = bearingAlongPolylineNearPoint(
+                routeLineForMap,
+                location.longitude,
+                location.latitude
+            );
+            if (along != null) return along;
+        }
+        const h = location.heading;
+        if (h != null && Number.isFinite(h) && h >= 0 && h < 360 && h !== -1) return h;
+        return 0;
+    }, [routeLineForMap, location.latitude, location.longitude, location.heading, isValidCoords]);
+
+    useEffect(() => {
+        if (departure.isRouteStarted && location) {
+            map.updateCameraPosition(location.latitude, location.longitude, displayHeading);
+        }
+    }, [departure.isRouteStarted, location, displayHeading, map.updateCameraPosition]);
 
     /**
      * Cadre la caméra sur l’itinéraire une fois les points chargés (carte prête ou peu après).
      */
     useEffect(() => {
-        if (!routeCoordinates || routeCoordinates.length < 2) return;
-        const n = routeCoordinates.length;
+        if (!routeLineForMap || routeLineForMap.length < 2) return;
+        const n = routeLineForMap.length;
         if (didFitRouteBoundsRef.current && n <= lastFittedPointCountRef.current) return;
 
         let cancelled = false;
@@ -393,8 +474,8 @@ export default function TrackRouteMapboxScreen() {
                 }
                 return;
             }
-            const lngs = routeCoordinates.map((c) => c[0]);
-            const lats = routeCoordinates.map((c) => c[1]);
+            const lngs = routeLineForMap.map((c) => c[0]);
+            const lats = routeLineForMap.map((c) => c[1]);
             const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
             const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
             if (ne[0] === sw[0] && ne[1] === sw[1]) {
@@ -416,30 +497,30 @@ export default function TrackRouteMapboxScreen() {
             cancelled = true;
             clearTimeout(t);
         };
-    }, [routeCoordinates, map.cameraRef]);
+    }, [routeLineForMap, map.cameraRef]);
 
     const centerCoord = map.toMapboxPosition(location.latitude, location.longitude);
 
     /** Tant que la polyline n’est pas prête, on garde un défaut caméra ; après chargement, fitBounds seul cadre l’itinéraire. */
     const routeReadyForCamera =
-        routeCoordinates != null && routeCoordinates.length >= 2;
+        routeLineForMap != null && routeLineForMap.length >= 2;
 
     const cameraDefaultSettings = useMemo(() => {
         if (routeReadyForCamera) return undefined;
         return {
             centerCoordinate: map.toMapboxPosition(location.latitude, location.longitude),
             zoomLevel: 12,
-            heading: location.heading ?? 0,
+            heading: displayHeading,
         };
-    }, [routeReadyForCamera, location.latitude, location.longitude, location.heading, map.toMapboxPosition]);
+    }, [routeReadyForCamera, location.latitude, location.longitude, displayHeading, map.toMapboxPosition]);
 
     /**
      * Au chargement de la carte : ne pas forcer un zoom 15 sur le conducteur si un itinéraire va être cadré (écrase fitBounds).
      */
     const handleMapLoaded = useCallback(() => {
-        if (fromCoord && toCoord) return;
+        if (routeFetchOrigin && toCoord) return;
         map.onMapLoaded();
-    }, [fromCoord, toCoord, map.onMapLoaded]);
+    }, [routeFetchOrigin, toCoord, map.onMapLoaded]);
 
     const routeLineStyle = useMemo(
         () => ({
@@ -454,10 +535,10 @@ export default function TrackRouteMapboxScreen() {
 
     /** Ne contrôle la caméra par props qu’en mode suivi pour permettre le pan sinon */
     const routeShape = useMemo(() => {
-        const coords = routeCoordinates && routeCoordinates.length >= 2
-            ? routeCoordinates
-            : fromCoord && toCoord
-                ? [fromCoord, toCoord]
+        const coords = routeLineForMap && routeLineForMap.length >= 2
+            ? routeLineForMap
+            : routeFetchOrigin && toCoord
+                ? [routeFetchOrigin, toCoord]
                 : null;
         if (!coords) return null;
         return {
@@ -471,7 +552,7 @@ export default function TrackRouteMapboxScreen() {
                 },
             }],
         };
-    }, [routeCoordinates, fromCoord, toCoord]);
+    }, [routeLineForMap, routeFetchOrigin, toCoord]);
     const cameraCenter = departure.departure && departure.isRouteStarted ? centerCoord : undefined;
 
     if (!departure.departure) return null;
@@ -531,14 +612,14 @@ export default function TrackRouteMapboxScreen() {
                     {routeShape && (
                         <ShapeSource
                             id="route-source"
-                            key={`route-${departure.departure?.id ?? "dep"}-${routeCoordinates?.length ?? 0}`}
+                            key={`route-${departure.departure?.id ?? "dep"}-${routeLineForMap?.length ?? routeCoordinates?.length ?? 0}`}
                             shape={routeShape}
                         >
                             <LineLayer id="route-line" style={routeLineStyle} />
                         </ShapeSource>
                     )}
-                    {fromCoord && (
-                        <MarkerView coordinate={fromCoord} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+                    {routeFetchOrigin && (
+                        <MarkerView coordinate={routeFetchOrigin} anchor={{ x: 0.5, y: 1 }} allowOverlap>
                             <Image source={require("@/assets/images/flag-start.png")} style={routeMarkerStyles.flag} resizeMode="contain" />
                         </MarkerView>
                     )}
@@ -547,7 +628,7 @@ export default function TrackRouteMapboxScreen() {
                             <Image source={require("@/assets/images/flag-end.png")} style={routeMarkerStyles.flag} resizeMode="contain" />
                         </MarkerView>
                     )}
-                    <UserMarkerMapbox coordinate={centerCoord} heading={location.heading} />
+                    <UserMarkerMapbox coordinate={centerCoord} heading={displayHeading} />
                 </MapView>
                 <ActionModal
                     visible={departure.showActionModal && departure.status.isScheduled}

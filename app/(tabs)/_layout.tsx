@@ -4,7 +4,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 
 /** Couleur onglet sélectionné (iOS) */
 const TAB_SELECTED_IOS = '#1776BA';
@@ -28,30 +28,58 @@ function useAndroidVectorIcons() {
             Promise.all([
                 MaterialCommunityIcons.getImageSource('bus', ANDROID_ICON_SIZE, '#687076'),
                 MaterialCommunityIcons.getImageSource('account', ANDROID_ICON_SIZE, '#687076'),
-            ]).then(([busIcon, accountIcon]) => {
-                setIcons({
-                    bus: busIcon,
-                    person: accountIcon,
+            ])
+                .then(([busIcon, accountIcon]) => {
+                    setIcons({
+                        bus: busIcon,
+                        person: accountIcon,
+                    });
+                })
+                .catch((e) => {
+                    console.error('[Tabs] Chargement icônes Android:', e);
+                    void Promise.all([
+                        MaterialCommunityIcons.getImageSource('bus', 48, '#687076'),
+                        MaterialCommunityIcons.getImageSource('account', 48, '#687076'),
+                    ])
+                        .then(([busIcon, accountIcon]) => setIcons({ bus: busIcon, person: accountIcon }))
+                        .catch((e2) => console.error('[Tabs] Fallback icônes Android:', e2));
                 });
-            });
         }
     }, []);
 
     return icons;
 }
 
-/** Icônes : SF Symbols sur iOS, images générées sur Android pour affichage net */
+/**
+ * Icônes : SF Symbols sur iOS ; sur Android uniquement des bitmaps (`sf` n’existe pas sur Android → risque d’écran blanc).
+ */
 function getTabIcons(androidIcons: any) {
+    if (Platform.OS === 'ios') {
+        return {
+            bus: { sf: 'bus.fill' as const },
+            person: { sf: 'person.fill' as const },
+        };
+    }
     return {
-        bus:
-            Platform.OS === 'ios'
-                ? { sf: 'bus.fill' as const }
-                : androidIcons?.bus ? { src: androidIcons.bus } : { sf: 'bus.fill' as const },
-        person:
-            Platform.OS === 'ios'
-                ? { sf: 'person.fill' as const }
-                : androidIcons?.person ? { src: androidIcons.person } : { sf: 'person.fill' as const },
+        bus: { src: androidIcons.bus },
+        person: { src: androidIcons.person },
     };
+}
+
+/** Attente du chargement des bitmaps tab (Android). */
+function AndroidTabsLoading() {
+    return (
+        <View
+            style={{
+                flex: 1,
+                justifyContent: 'center',
+                alignItems: 'center',
+                backgroundColor: '#ffffff',
+            }}
+        >
+            <ActivityIndicator size="large" color="#1776BA" />
+        </View>
+    );
 }
 
 /** Retourne les props de style de la barre d'onglets pour Android (couleurs thème) */
@@ -98,6 +126,11 @@ export default function TabLayout() {
     const androidStyle = getAndroidTabBarStyle(colorScheme);
     const iosStyle = getIOSTabBarStyle(colorScheme);
     const androidIcons = useAndroidVectorIcons();
+
+    if (Platform.OS === 'android' && (!androidIcons?.bus || !androidIcons?.person)) {
+        return <AndroidTabsLoading />;
+    }
+
     const tabIcons = getTabIcons(androidIcons);
 
     return (

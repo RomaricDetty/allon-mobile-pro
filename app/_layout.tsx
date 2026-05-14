@@ -8,6 +8,7 @@ import CustomSplashScreen from '@/components/custom-splashscreen';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 
 export const unstable_settings = {
     anchor: '(tabs)',
@@ -99,7 +100,11 @@ export default function RootLayout() {
     }, [fontsLoaded, fontsError, isCustomSplashMounted]);
 
     if (!fontsLoaded && !fontsError) {
-        return null;
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#ffffff' }}>
+                <ActivityIndicator size="large" color="#1776BA" />
+            </View>
+        );
     }
 
     if (!isAppReady) {

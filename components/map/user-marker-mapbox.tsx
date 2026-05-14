@@ -7,8 +7,18 @@ type Position = [number, number];
 interface UserMarkerMapboxProps {
     /** Position Mapbox [longitude, latitude] */
     coordinate: Position;
-    /** Cap en degrés (0–360) pour orienter l’icône */
+    /** Cap en degrés (0–360, nord = 0°) pour orienter l’icône */
     heading?: number | null;
+}
+
+/** Décalage si le PNG du bus pointe vers l’est alors que le cap est exprimé depuis le nord. */
+const ICON_HEADING_OFFSET_DEG = -90;
+
+/**
+ * Normalise un angle en degrés dans [0, 360).
+ */
+function normalizeHeadingDeg(deg: number): number {
+    return ((deg % 360) + 360) % 360;
 }
 
 /**
@@ -33,29 +43,25 @@ const UserMarkerMapbox: React.FC<UserMarkerMapboxProps> = ({ coordinate, heading
     }, []);
 
     useEffect(() => {
-        if (heading !== null && heading !== undefined && heading >= 0) {
-            const previousHeading = previousHeadingRef.current;
-            let targetHeading = heading;
-            const diff = targetHeading - previousHeading;
-            if (diff > 180) targetHeading = targetHeading - 360;
-            else if (diff < -180) targetHeading = targetHeading + 360;
+        if (heading === null || heading === undefined || !Number.isFinite(heading)) return;
 
-            if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
-            setIsAnimating(true);
+        const adjusted = normalizeHeadingDeg(heading + ICON_HEADING_OFFSET_DEG);
 
-            Animated.timing(rotationRef.current, {
-                toValue: targetHeading,
-                duration: 300,
-                useNativeDriver: true,
-            }).start(() => {
-                previousHeadingRef.current = heading;
-                rotationRef.current.setValue(heading);
-                animationTimeoutRef.current = setTimeout(
-                    () => setIsAnimating(false),
-                    Platform.OS === "android" ? 200 : 100
-                );
-            });
-        }
+        if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+        setIsAnimating(true);
+
+        Animated.timing(rotationRef.current, {
+            toValue: adjusted,
+            duration: 300,
+            useNativeDriver: true,
+        }).start(() => {
+            previousHeadingRef.current = adjusted;
+            rotationRef.current.setValue(adjusted);
+            animationTimeoutRef.current = setTimeout(
+                () => setIsAnimating(false),
+                Platform.OS === "android" ? 200 : 100
+            );
+        });
         return () => {
             if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
         };

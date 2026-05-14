@@ -134,15 +134,21 @@ export async function calculateMapboxRoute(
     }
 }
 
+export type GetRouteCoordinatesOptions = {
+    /** Si true, ignore la géométrie serveur et recalcule via Mapbox depuis fromCoord (ex. position conducteur). */
+    skipPrecalculatedRoute?: boolean;
+};
+
 /**
  * Obtenir l'itinéraire complet (pré-calculé ou via API)
  */
 export async function getRouteCoordinates(
     trip: any,
     fromCoord: [number, number],
-    toCoord: [number, number]
+    toCoord: [number, number],
+    options?: GetRouteCoordinatesOptions
 ): Promise<[number, number][]> {
-    const preCalculated = extractPreCalculatedRoute(trip);
+    const preCalculated = options?.skipPrecalculatedRoute ? null : extractPreCalculatedRoute(trip);
     
     if (preCalculated) {
         console.log('[RouteCalculator] Utilisation de l\'itinéraire pré-calculé:', preCalculated.length, 'points');

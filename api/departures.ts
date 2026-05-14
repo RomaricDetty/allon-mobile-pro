@@ -2,6 +2,30 @@ import axios, { AxiosResponse } from "axios";
 import { baseUrl } from "./config";
 
 /**
+ * Erreur lors d’un PATCH départ (embarquement / départ / arrivée) si le status HTTP n’est pas 2xx.
+ */
+export class DepartureStatusApiError extends Error {
+    readonly statusCode: number;
+    /** Message métier renvoyé par l’API (champ `message` du JSON), sinon null. */
+    readonly apiMessage: string | null;
+
+    constructor(statusCode: number, apiMessage: string | null) {
+        super(apiMessage ?? `HTTP_${statusCode}`);
+        this.name = "DepartureStatusApiError";
+        this.statusCode = statusCode;
+        this.apiMessage = apiMessage;
+    }
+
+    /**
+     * Texte à afficher : message API si présent, sinon le libellé par défaut.
+     */
+    resolveDisplayMessage(fallback: string): string {
+        const m = this.apiMessage?.trim();
+        return m ? m : fallback;
+    }
+}
+
+/**
  * Récupère la liste des départs de l'utilisateur connecté
  * @param userId - L'ID de l'utilisateur
  * @param token - Le token d'authentification
@@ -201,17 +225,20 @@ export const markAsStatusDepartureApi = async (departureId: string, token: strin
         }
     } else {
         // Si la réponse n'est pas OK, essayer de parser le message d'erreur
+        let data: { message?: string; error?: string; statusCode?: number };
         try {
             data = await response.json();
-        } catch (error) {
-            // Si on ne peut pas parser le JSON, créer un objet d'erreur
+        } catch {
             data = {
-                error: response.statusText || 'Erreur inconnue',
+                error: response.statusText || "Erreur inconnue",
                 message: `Erreur ${response.status}: ${response.statusText}`,
             };
         }
-        // Lancer une erreur pour que le catch dans le code appelant puisse la gérer
-        throw new Error(`Erreur ${response.status}: ${data.message || data.error || response.statusText}`);
+        const apiMsg =
+            typeof data?.message === "string" && data.message.trim() !== ""
+                ? data.message.trim()
+                : null;
+        throw new DepartureStatusApiError(response.status, apiMsg);
     }
     
     return {

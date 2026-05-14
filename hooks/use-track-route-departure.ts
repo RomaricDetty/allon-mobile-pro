@@ -1,4 +1,4 @@
-import { markAsStatusDepartureApi } from "@/api/departures";
+import { DepartureStatusApiError, markAsStatusDepartureApi } from "@/api/departures";
 import { departureEventEmitter } from "@/utils/departure-events";
 import { logError } from "@/utils/logger";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -9,6 +9,13 @@ import type { Departure } from "@/components/departure-card";
 import { CONFIRM_MESSAGES, ACTION_COLORS, type RouteAction } from "@/app/track-route/constants";
 
 type ModalAction = "boarding" | "startRoute" | "finishRoute";
+
+/** Messages par défaut si l’API ne renvoie pas de `message` (status ≠ 2xx). */
+const DEFAULT_DEPARTURE_STATUS_MESSAGE: Record<"boarding" | "departed" | "arrived", string> = {
+    boarding: "Impossible d'enregistrer l'embarquement.",
+    departed: "Impossible de démarrer le départ.",
+    arrived: "Impossible de terminer le départ.",
+};
 
 /**
  * Hook de gestion du départ et des actions (embarquement, départ, arrivée)
@@ -86,7 +93,14 @@ export function useTrackRouteDeparture(
                 }
             } catch (e) {
                 logError("[TRACK-ROUTE]", e);
-                Alert.alert("Erreur", "Impossible de mettre à jour le statut.");
+                const fallback = DEFAULT_DEPARTURE_STATUS_MESSAGE[apiStatus];
+                const alertMessage =
+                    e instanceof DepartureStatusApiError
+                        ? e.resolveDisplayMessage(fallback)
+                        : e instanceof Error && e.message?.trim()
+                          ? e.message.trim()
+                          : fallback;
+                Alert.alert("Erreur", alertMessage);
             } finally {
                 setLoadingAction(null);
             }
