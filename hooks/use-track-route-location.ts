@@ -1,8 +1,8 @@
 import { calculateDistance } from "@/utils/location";
-import { logError, logWithTag } from "@/utils/logger";
+import { logError } from "@/utils/logger";
 import * as Location from "expo-location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform } from "react-native";
+import { Alert, AppState, Linking, Platform } from "react-native";
 import { router } from "expo-router";
 import {
     DEFAULT_LATITUDE_DELTA,
@@ -24,6 +24,10 @@ export function useTrackRouteLocation(defaultLongitudeDelta: number) {
     const watcherRef = useRef<Location.LocationSubscription | null>(null);
     const prevRef = useRef<{ latitude: number; longitude: number; timestamp: number } | null>(null);
     const warmUpRef = useRef(0);
+    /** Incrémenté pour relancer la demande de permission (Réessayer ou retour depuis Réglages). */
+    const [permissionRetryKey, setPermissionRetryKey] = useState(0);
+    /** True si l’utilisateur a ouvert les réglages depuis notre alerte — on revérifie la permission au retour au premier plan. */
+    const awaitingSettingsRef = useRef(false);
     const [isWarmingUp, setIsWarmingUp] = useState(true);
 
     const defaultLocation = useMemo<LocationData>(
@@ -77,23 +81,72 @@ export function useTrackRouteLocation(defaultLongitudeDelta: number) {
         }
     }, []);
 
+    /**
+     * Affiche une alerte tant que la permission foreground n’est pas accordée (réglages + nouvelle tentative).
+     */
+    const showForegroundPermissionAlert = useCallback(() => {
+        Alert.alert(
+            "Localisation requise",
+            "Pour suivre le trajet sur la carte, autorisez l’accès à la position dans les réglages du téléphone (ou appuyez sur « Réessayer » pour afficher de nouveau la demande si le système le permet).",
+            [
+                { text: "Quitter", style: "cancel", onPress: () => router.back() },
+                {
+                    text: "Réessayer",
+                    onPress: () => setPermissionRetryKey((k) => k + 1),
+                },
+                {
+                    text: "Ouvrir les paramètres",
+                    onPress: () => {
+                        awaitingSettingsRef.current = true;
+                        Linking.openSettings();
+                    },
+                },
+            ]
+        );
+    }, []);
+
+    useEffect(() => {
+        const sub = AppState.addEventListener("change", (next) => {
+            if (next === "active" && awaitingSettingsRef.current) {
+                awaitingSettingsRef.current = false;
+                setPermissionRetryKey((k) => k + 1);
+            }
+        });
+        return () => sub.remove();
+    }, []);
+
     useEffect(() => {
         let mounted = true;
         (async () => {
             try {
                 let { status } = await Location.getForegroundPermissionsAsync();
-                if (status !== "granted") status = (await Location.requestForegroundPermissionsAsync()).status;
+                if (status !== "granted") {
+                    status = (await Location.requestForegroundPermissionsAsync()).status;
+                }
                 if (status !== "granted") {
                     if (mounted) {
-                        Alert.alert("Permission refusée", "L'accès à la localisation est nécessaire pour suivre le trajet.", [{ text: "OK", onPress: () => router.back() }]);
                         setIsLoading(false);
+                        showForegroundPermissionAlert();
                     }
                     return;
                 }
                 if (Platform.OS === "android" && !(await Location.hasServicesEnabledAsync())) {
                     if (mounted) {
-                        Alert.alert("Localisation désactivée", "Veuillez activer les services de localisation (GPS).", [{ text: "OK", onPress: () => router.back() }]);
                         setIsLoading(false);
+                        Alert.alert(
+                            "GPS désactivé",
+                            "Activez la localisation (GPS) dans les paramètres de l’appareil pour suivre le trajet.",
+                            [
+                                { text: "Quitter", style: "cancel", onPress: () => router.back() },
+                                {
+                                    text: "Ouvrir les paramètres",
+                                    onPress: () => {
+                                        awaitingSettingsRef.current = true;
+                                        Linking.openSettings();
+                                    },
+                                },
+                            ]
+                        );
                     }
                     return;
                 }
@@ -142,7 +195,7 @@ export function useTrackRouteLocation(defaultLongitudeDelta: number) {
             mounted = false;
             stopTracking();
         };
-    }, [defaultLongitudeDelta, stopTracking, handleUpdate]);
+    }, [defaultLongitudeDelta, stopTracking, handleUpdate, permissionRetryKey, showForegroundPermissionAlert]);
 
     return { location, setLocation, isLoading, defaultLocation, stopTracking, isValidCoords };
 }
