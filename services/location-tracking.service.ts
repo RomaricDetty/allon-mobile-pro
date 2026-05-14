@@ -1,4 +1,6 @@
 import * as Location from 'expo-location';
+import { Platform } from 'react-native';
+import { BUS_LOCATION_TASK_NAME } from '@/services/location-tracking.constants';
 import { socketService } from './socket.service';
 
 // Constantes de configuration par défaut
@@ -30,6 +32,7 @@ interface LocationUpdate {
  * Gère le suivi de position en arrière-plan et l'envoi via Socket.IO
  */
 class LocationTrackingService {
+    /** Utilisé seulement en repli (web ou échec de `startLocationUpdatesAsync`). */
     private subscription: Location.LocationSubscription | null = null;
     private isTracking: boolean = false;
     private currentBusId: string | null = null;
@@ -184,25 +187,49 @@ class LocationTrackingService {
                 minTimeThreshold: (this.minTimeThreshold / 1000) + 's',
             });
 
-            this.subscription = await Location.watchPositionAsync(
-                {
-                    accuracy,
-                    distanceInterval,
-                    timeInterval,
-                    mayShowUserSettingsDialog: true,
-                    // @ts-ignore
-                    foregroundService: {
-                        notificationTitle: 'Trajet en cours',
-                        notificationBody: 'Votre position est partagée en temps réel',
-                        notificationColor: '#1776BA',
-                    },
+            const taskOptions: Location.LocationTaskOptions = {
+                accuracy,
+                distanceInterval,
+                timeInterval,
+                mayShowUserSettingsDialog: true,
+                pausesUpdatesAutomatically: false,
+                showsBackgroundLocationIndicator: true,
+                activityType: Location.ActivityType.AutomotiveNavigation,
+                foregroundService: {
+                    notificationTitle: 'Trajet en cours',
+                    notificationBody: 'Votre position est partagée en temps réel',
+                    notificationColor: '#1776BA',
                 },
-                (location) => this.handleLocationUpdate(location, config.busId)
-            );
+            };
+
+            if (Platform.OS === 'web') {
+                this.subscription = await Location.watchPositionAsync(taskOptions, (location) =>
+                    this.handleLocationUpdate(location, config.busId)
+                );
+                const pollMs = Math.max(1000, timeInterval);
+                this.startPeriodicGpsPoll(config.busId, pollMs);
+            } else {
+                if (await Location.hasStartedLocationUpdatesAsync(BUS_LOCATION_TASK_NAME)) {
+                    await Location.stopLocationUpdatesAsync(BUS_LOCATION_TASK_NAME);
+                }
+                try {
+                    await Location.startLocationUpdatesAsync(BUS_LOCATION_TASK_NAME, taskOptions);
+                    const pollMs = Math.max(1000, timeInterval);
+                    this.startPeriodicGpsPoll(config.busId, pollMs);
+                } catch (taskErr) {
+                    console.warn(
+                        '[LocationTracking] startLocationUpdatesAsync indisponible, repli sur watchPositionAsync:',
+                        taskErr
+                    );
+                    this.subscription = await Location.watchPositionAsync(taskOptions, (location) =>
+                        this.handleLocationUpdate(location, config.busId)
+                    );
+                    const pollMs = Math.max(1000, timeInterval);
+                    this.startPeriodicGpsPoll(config.busId, pollMs);
+                }
+            }
 
             this.isTracking = true;
-            const pollMs = Math.max(1000, timeInterval);
-            this.startPeriodicGpsPoll(config.busId, pollMs);
             console.log('[LocationTracking] Tracking démarré avec succès pour le bus:', config.busId);
             return true;
         } catch (error) {
@@ -242,6 +269,14 @@ class LocationTrackingService {
         }
 
         return { send: false, reason: 'Seuils non atteints' };
+    }
+
+    /**
+     * Point d’entrée pour les positions livrées par la tâche TaskManager (y compris app en arrière-plan).
+     */
+    consumeTaskLocationUpdate(location: Location.LocationObject): void {
+        if (!this.isTracking || !this.currentBusId) return;
+        this.handleLocationUpdate(location, this.currentBusId);
     }
 
     /**
@@ -335,6 +370,9 @@ class LocationTrackingService {
             if (this.subscription) {
                 this.subscription.remove();
                 this.subscription = null;
+            }
+            if (Platform.OS !== 'web' && (await Location.hasStartedLocationUpdatesAsync(BUS_LOCATION_TASK_NAME))) {
+                await Location.stopLocationUpdatesAsync(BUS_LOCATION_TASK_NAME);
             }
 
             if (this.currentBusId) {

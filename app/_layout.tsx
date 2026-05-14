@@ -3,6 +3,7 @@ import { useFonts } from 'expo-font';
 import { SplashScreen, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import '@/services/location-tracking-task';
 
 import CustomSplashScreen from '@/components/custom-splashscreen';
 import { ThemeProvider } from '@/contexts/ThemeContext';
