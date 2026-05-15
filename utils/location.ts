@@ -43,17 +43,24 @@ export function bearingDegrees(lat1: number, lng1: number, lat2: number, lng2: n
     return ((θ * 180) / Math.PI + 360) % 360;
 }
 
+type SegmentProjection = {
+    lat: number;
+    lng: number;
+    t: number;
+    distM: number;
+};
+
 /**
- * Distance approximative (m) du point P au segment [A,B] en projection locale (segments courts).
+ * Projette un point sur le segment [A,B] (coordonnées en degrés) et retourne la distance au segment.
  */
-function distancePointToSegmentMeters(
+function projectPointOnSegment(
     lat: number,
     lng: number,
     lat1: number,
     lng1: number,
     lat2: number,
     lng2: number
-): number {
+): SegmentProjection {
     const cosLat = Math.cos((((lat1 + lat2) / 2) * Math.PI) / 180);
     const mx = (lng: number, la: number) => ({ x: lng * cosLat * 111320, y: la * 110540 });
     const A = mx(lng1, lat1);
@@ -65,7 +72,7 @@ function distancePointToSegmentMeters(
     if (len2 < 1e-6) {
         const px = P.x - A.x;
         const py = P.y - A.y;
-        return Math.sqrt(px * px + py * py);
+        return { lat: lat1, lng: lng1, t: 0, distM: Math.sqrt(px * px + py * py) };
     }
     let t = ((P.x - A.x) * dx + (P.y - A.y) * dy) / len2;
     t = Math.max(0, Math.min(1, t));
@@ -73,7 +80,24 @@ function distancePointToSegmentMeters(
     const qy = A.y + t * dy;
     const rx = P.x - qx;
     const ry = P.y - qy;
-    return Math.sqrt(rx * rx + ry * ry);
+    const distM = Math.sqrt(rx * rx + ry * ry);
+    const latOut = lat1 + t * (lat2 - lat1);
+    const lngOut = lng1 + t * (lng2 - lng1);
+    return { lat: latOut, lng: lngOut, t, distM };
+}
+
+/**
+ * Distance approximative (m) du point P au segment [A,B] en projection locale (segments courts).
+ */
+function distancePointToSegmentMeters(
+    lat: number,
+    lng: number,
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number
+): number {
+    return projectPointOnSegment(lat, lng, lat1, lng1, lat2, lng2).distM;
 }
 
 /**
@@ -84,21 +108,40 @@ export function bearingAlongPolylineNearPoint(
     lng: number,
     lat: number
 ): number | null {
+    const snap = snapPointToPolyline(coords, lng, lat);
+    return snap?.bearing ?? null;
+}
+
+/**
+ * Projette la position GPS sur le segment d’itinéraire le plus proche (snap route).
+ */
+export function snapPointToPolyline(
+    coords: [number, number][],
+    lng: number,
+    lat: number
+): { lng: number; lat: number; bearing: number } | null {
     if (!coords || coords.length < 2) return null;
-    let best = 0;
+    let bestI = 0;
+    let bestProj: SegmentProjection | null = null;
     let bestD = Infinity;
     for (let i = 0; i < coords.length - 1; i++) {
         const [lng1, lat1] = coords[i];
         const [lng2, lat2] = coords[i + 1];
-        const d = distancePointToSegmentMeters(lat, lng, lat1, lng1, lat2, lng2);
-        if (d < bestD) {
-            bestD = d;
-            best = i;
+        const proj = projectPointOnSegment(lat, lng, lat1, lng1, lat2, lng2);
+        if (proj.distM < bestD) {
+            bestD = proj.distM;
+            bestI = i;
+            bestProj = proj;
         }
     }
-    const [lngA, latA] = coords[best];
-    const [lngB, latB] = coords[best + 1];
-    return bearingDegrees(latA, lngA, latB, lngB);
+    if (!bestProj) return null;
+    const [lngA, latA] = coords[bestI];
+    const [lngB, latB] = coords[bestI + 1];
+    return {
+        lng: bestProj.lng,
+        lat: bestProj.lat,
+        bearing: bearingDegrees(latA, lngA, latB, lngB),
+    };
 }
 
 /**

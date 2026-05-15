@@ -11,8 +11,8 @@ interface UserMarkerMapboxProps {
     heading?: number | null;
 }
 
-/** Décalage si le PNG du bus pointe vers l’est alors que le cap est exprimé depuis le nord. */
-const ICON_HEADING_OFFSET_DEG = -90;
+/** Même convention que user-marker (react-native-maps) : le PNG pointe vers le haut = nord géographique. */
+const ICON_HEADING_OFFSET_DEG = 0;
 
 /**
  * Normalise un angle en degrés dans [0, 360).

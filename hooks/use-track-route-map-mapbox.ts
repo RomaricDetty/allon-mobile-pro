@@ -9,6 +9,8 @@ export function toMapboxPosition(lat: number, lng: number): [number, number] {
 }
 
 const DEFAULT_ZOOM = 15;
+/** Zoom utilisé en mode navigation (recentrage bus + cap itinéraire). */
+const NAVIGATION_ZOOM = 16.5;
 const MIN_ZOOM = 10;
 const MAX_ZOOM = 20;
 
@@ -89,11 +91,45 @@ export function useTrackRouteMapMapbox(
         }
     }, [location, isValidCoordinates]);
 
+    /**
+     * Recentre la carte sur le bus, aligne le cap sur l’itinéraire et reprend le suivi automatique.
+     */
+    const recenterOnBus = useCallback(
+        (lat: number, lng: number, heading: number) => {
+            if (!cameraRef.current || !isValidCoordinates(lat, lng)) return;
+            isInteractingRef.current = false;
+            lastCameraRef.current = 0;
+            setZoomLevel(NAVIGATION_ZOOM);
+            try {
+                cameraRef.current.setCamera({
+                    centerCoordinate: toMapboxPosition(lat, lng),
+                    zoomLevel: NAVIGATION_ZOOM,
+                    heading,
+                    animationDuration: 400,
+                });
+            } catch (e) {
+                logError("[MAPBOX]", e);
+            }
+        },
+        [isValidCoordinates]
+    );
+
     const onCameraChanged = useCallback((state: { properties: { zoom: number } }) => {
         setZoomLevel(state.properties.zoom);
     }, []);
 
     const onRegionChangeStart = useCallback(() => { isInteractingRef.current = true; }, []);
+
+    /** Détecte un déplacement manuel de la carte (pan / pinch / rotation). */
+    const onRegionWillChange = useCallback(
+        (feature: { properties?: { isUserInteraction?: boolean } }) => {
+            if (feature.properties?.isUserInteraction) {
+                isInteractingRef.current = true;
+            }
+        },
+        []
+    );
+
     const onRegionChangeComplete = useCallback(() => {
         setTimeout(() => { isInteractingRef.current = false; }, 5000);
     }, []);
@@ -121,9 +157,11 @@ export function useTrackRouteMapMapbox(
         zoomIn: () => handleZoom(1),
         zoomOut: () => handleZoom(-1),
         resetZoom,
+        recenterOnBus,
         updateCameraPosition: updateCamera,
         onCameraChanged,
         onRegionChangeStart,
+        onRegionWillChange,
         onRegionChangeComplete,
         onMapLoaded,
         toMapboxPosition,
