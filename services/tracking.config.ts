@@ -18,7 +18,7 @@ export const TRACKING_CONFIG = {
   
   // Configuration Socket.IO
   SOCKET: {
-    URL: 'https://dev-allon-backend.onrender.com',
+    URL: 'https://api.allon-apps.com',
     RECONNECTION_ATTEMPTS: 5,
     RECONNECTION_DELAY: 1000, // 1 seconde
     TIMEOUT: 10000, // 10 secondes

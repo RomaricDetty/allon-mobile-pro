@@ -20,10 +20,10 @@ const colors = {
 };
 
 const log = {
-  success: (msg) => console.log(`${colors.green}✅ ${msg}${colors.reset}`),
-  error: (msg) => console.log(`${colors.red}❌ ${msg}${colors.reset}`),
-  warning: (msg) => console.log(`${colors.yellow}⚠️  ${msg}${colors.reset}`),
-  info: (msg) => console.log(`${colors.blue}ℹ️  ${msg}${colors.reset}`),
+  success: (msg) => console.log(`${colors.green} ${msg}${colors.reset}`),
+  error: (msg) => console.log(`${colors.red} ${msg}${colors.reset}`),
+  warning: (msg) => console.log(`${colors.yellow} ${msg}${colors.reset}`),
+  info: (msg) => console.log(`${colors.blue} ${msg}${colors.reset}`),
   title: (msg) => console.log(`\n${colors.cyan}${msg}${colors.reset}\n`),
 };
 
@@ -116,7 +116,7 @@ function checkCodeFiles() {
  * Vérifier les fichiers de documentation
  */
 function checkDocFiles() {
-  log.title('📚 Vérification de la documentation');
+  log.title('Vérification de la documentation');
   
   let allFound = true;
   
@@ -135,7 +135,7 @@ function checkDocFiles() {
  * Vérifier la configuration app.json
  */
 function checkAppJson() {
-  log.title('⚙️  Vérification de app.json');
+  log.title('Vérification de app.json');
   
   const appJsonPath = path.join(process.cwd(), 'app.json');
   
@@ -196,7 +196,7 @@ function checkAppJson() {
  * Vérifier les permissions Android
  */
 function checkAndroidPermissions() {
-  log.title('🤖 Vérification des permissions Android');
+  log.title('Vérification des permissions Android');
   
   const manifestPath = path.join(process.cwd(), 'android/app/src/main/AndroidManifest.xml');
   
@@ -237,7 +237,7 @@ function checkAndroidPermissions() {
  * Vérifier les permissions iOS
  */
 function checkIOSPermissions() {
-  log.title('🍎 Vérification des permissions iOS');
+  log.title('Vérification des permissions iOS');
   
   const infoPlistPath = path.join(process.cwd(), 'ios/AllonMobilePro/Info.plist');
   
@@ -276,7 +276,7 @@ function checkIOSPermissions() {
  * Afficher les prochaines étapes
  */
 function showNextSteps() {
-  log.title('🎯 Prochaines étapes');
+  log.title('Prochaines étapes');
   
   console.log('1. Lire TRACKING_README.md pour une vue d\'ensemble');
   console.log('2. Suivre TRACKING_QUICKSTART.md pour démarrer');
@@ -291,7 +291,7 @@ function showNextSteps() {
  */
 function main() {
   console.log('\n' + '='.repeat(60));
-  console.log('🚀 Vérification du système de tracking');
+  console.log('Vérification du système de tracking');
   console.log('='.repeat(60));
 
   const results = {
@@ -303,7 +303,7 @@ function main() {
     iosPermissions: checkIOSPermissions(),
   };
 
-  log.title('📊 Résumé');
+  log.title('Résumé');
   
   const allPassed = Object.values(results).every(r => r === true);
   
