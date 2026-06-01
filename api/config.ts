@@ -1,1 +1,1 @@
-export const baseUrl = 'https://dev-allon-backend.onrender.com/api';
+export const baseUrl = 'https://api.allon-apps.com';
