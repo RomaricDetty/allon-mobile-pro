@@ -17,7 +17,7 @@ interface SocketConfig {
 }
 
 // Constantes de configuration
-const DEFAULT_SOCKET_URL = 'https://dev-allon-backend.onrender.com';
+const DEFAULT_SOCKET_URL = 'https://api.allon-apps.com';
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECTION_DELAY = 1000;
 const RECONNECTION_DELAY_MAX = 5000;
