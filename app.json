@@ -91,7 +91,8 @@
             "buildReactNativeFromSource": true
           }
         }
-      ]
+      ],
+      "./plugins/with-fmt-xcode26-fix.js"
     ],
     "experiments": {
       "typedRoutes": true,
